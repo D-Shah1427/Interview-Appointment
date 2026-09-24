@@ -25,6 +25,7 @@ interface InterviewContextType {
   cancelInterview: (bookingId: string) => void;
   updatePanelMember: (member: PanelMember) => void;
   addPanelMember: (member: Omit<PanelMember, 'id' | 'totalInterviewsConducted'>) => void;
+  deletePanelMember: (memberId: string) => void;
   resetData: () => void;
   liveAlert: { id: string; message: string; type: 'lock' | 'booking' | 'info' } | null;
   dismissLiveAlert: () => void;
@@ -80,7 +81,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [reloadFromStorage]);
 
   const getSlotCapacity = useCallback((dateStr: string, timeStr: string): SlotCapacityInfo => {
-    return calculateSlotCapacity(dateStr, timeStr, panelMembers, bookings);
+    return calculateSlotCapacity(dateStr, timeStr, panelMembers, bookings, 30);
   }, [panelMembers, bookings]);
 
   const bookInterview = useCallback(async (data: {
@@ -92,7 +93,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     date: string;
     time: string;
   }): Promise<InterviewBooking> => {
-    const capacityInfo = calculateSlotCapacity(data.date, data.time, panelMembers, bookings);
+    const capacityInfo = calculateSlotCapacity(data.date, data.time, panelMembers, bookings, 30);
 
     if (capacityInfo.isLocked || capacityInfo.remainingInterviewsCapacity <= 0) {
       playChime('lock');
@@ -116,7 +117,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       stageTitle: 'Interview Appointment',
       date: data.date,
       time: data.time,
-      durationMinutes: 60,
+      durationMinutes: 30,
       meetingLink,
       assignedPanel,
       bookedAt: new Date().toISOString(),
@@ -152,6 +153,11 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     reloadFromStorage();
   }, [reloadFromStorage]);
 
+  const deletePanelMember = useCallback((memberId: string) => {
+    storageService.deletePanelMember(memberId);
+    reloadFromStorage();
+  }, [reloadFromStorage]);
+
   const resetData = useCallback(() => {
     storageService.resetToDefaultSeed();
     reloadFromStorage();
@@ -176,6 +182,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         cancelInterview,
         updatePanelMember,
         addPanelMember,
+        deletePanelMember,
         resetData,
         liveAlert,
         dismissLiveAlert

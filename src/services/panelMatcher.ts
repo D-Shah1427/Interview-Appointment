@@ -1,18 +1,23 @@
 import type { PanelMember, InterviewBooking, SlotCapacityInfo, AssignedPanelist } from '../types';
 
 /**
- * Checks if a given time slot "HH:MM" falls within a time window "HH:MM" - "HH:MM"
+ * Checks if a given time slot "HH:MM" with duration (default 30 mins) fits within a window "HH:MM" - "HH:MM"
  */
-export function isTimeInWindow(time: string, window: { start: string; end: string }): boolean {
+export function isTimeInWindow(
+  time: string,
+  window: { start: string; end: string },
+  durationMinutes = 30
+): boolean {
   const [slotH, slotM] = time.split(':').map(Number);
   const [startH, startM] = window.start.split(':').map(Number);
   const [endH, endM] = window.end.split(':').map(Number);
 
-  const slotMinutes = slotH * 60 + slotM;
-  const startMinutes = startH * 60 + startM;
-  const endMinutes = endH * 60 + endM;
+  const slotStart = slotH * 60 + slotM;
+  const slotEnd = slotStart + durationMinutes;
+  const windowStart = startH * 60 + startM;
+  const windowEnd = endH * 60 + endM;
 
-  return slotMinutes >= startMinutes && slotMinutes < endMinutes;
+  return slotStart >= windowStart && slotEnd <= windowEnd;
 }
 
 /**
@@ -22,14 +27,26 @@ export function isPanelistAvailableForSlot(
   panelist: PanelMember,
   dateStr: string,
   timeStr: string,
-  bookings: InterviewBooking[]
+  bookings: InterviewBooking[],
+  slotDuration = 30
 ): boolean {
-  // 1. Check if panelist is already booked for this date and time
-  const alreadyBooked = bookings.some(
-    b => b.date === dateStr && b.time === timeStr && b.status === 'confirmed' &&
-      b.assignedPanel.some(p => p.memberId === panelist.id)
-  );
-  if (alreadyBooked) return false;
+  const [sH, sM] = timeStr.split(':').map(Number);
+  const slotStart = sH * 60 + sM;
+  const slotEnd = slotStart + slotDuration;
+
+  // 1. Check if panelist is already booked for any interview overlapping with this slot
+  const overlapsExistingBooking = bookings.some(b => {
+    if (b.date !== dateStr || b.status !== 'confirmed') return false;
+    const isAssigned = b.assignedPanel.some(p => p.memberId === panelist.id);
+    if (!isAssigned) return false;
+
+    const [bH, bM] = b.time.split(':').map(Number);
+    const bStart = bH * 60 + bM;
+    const bEnd = bStart + (b.durationMinutes || 30);
+
+    return Math.max(slotStart, bStart) < Math.min(slotEnd, bEnd);
+  });
+  if (overlapsExistingBooking) return false;
 
   // 2. Check daily interview limit
   const interviewsToday = bookings.filter(
@@ -37,15 +54,15 @@ export function isPanelistAvailableForSlot(
       b.assignedPanel.some(p => p.memberId === panelist.id)
   ).length;
 
-  if (interviewsToday >= panelist.maxInterviewsPerDay) {
+  if (interviewsToday >= (panelist.maxInterviewsPerDay || 3)) {
     return false;
   }
 
-  // 3. Check date override (e.g., Vacation / Out of office)
+  // 3. Check date override (e.g., Vacation / Out of office or custom times for this date)
   if (panelist.dateOverrides && panelist.dateOverrides[dateStr] !== undefined) {
     const override = panelist.dateOverrides[dateStr];
     if (override === false) return false; // Full day off
-    return override.some(w => isTimeInWindow(timeStr, w));
+    return override.some(w => isTimeInWindow(timeStr, w, slotDuration));
   }
 
   // 4. Check standard weekly schedule
@@ -54,7 +71,7 @@ export function isPanelistAvailableForSlot(
   const dayOfWeek = dateObj.getDay();
 
   const dayWindows = panelist.weeklySchedule[dayOfWeek] || [];
-  return dayWindows.some(w => isTimeInWindow(timeStr, w));
+  return dayWindows.some(w => isTimeInWindow(timeStr, w, slotDuration));
 }
 
 /**
@@ -69,15 +86,24 @@ export function calculateSlotCapacity(
   dateStr: string,
   timeStr: string,
   allPanelists: PanelMember[],
-  allBookings: InterviewBooking[]
+  allBookings: InterviewBooking[],
+  slotDuration = 30
 ): SlotCapacityInfo {
-  const slotBookings = allBookings.filter(
-    b => b.date === dateStr && b.time === timeStr && b.status === 'confirmed'
-  );
+  const [sH, sM] = timeStr.split(':').map(Number);
+  const slotStart = sH * 60 + sM;
+  const slotEnd = slotStart + slotDuration;
+
+  const slotBookings = allBookings.filter(b => {
+    if (b.date !== dateStr || b.status !== 'confirmed') return false;
+    const [bH, bM] = b.time.split(':').map(Number);
+    const bStart = bH * 60 + bM;
+    const bEnd = bStart + (b.durationMinutes || 30);
+    return Math.max(slotStart, bStart) < Math.min(slotEnd, bEnd);
+  });
   const bookedCount = slotBookings.length;
 
   // Find free panelists for this slot
-  const freePanelists = allPanelists.filter(p => isPanelistAvailableForSlot(p, dateStr, timeStr, allBookings));
+  const freePanelists = allPanelists.filter(p => isPanelistAvailableForSlot(p, dateStr, timeStr, allBookings, slotDuration));
   const freeCount = freePanelists.length;
 
   // Compute maximum interview capacity

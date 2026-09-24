@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Users, BarChart3, ExternalLink } from 'lucide-react';
+import { Calendar, Users, BarChart3, ExternalLink, ShieldCheck, ArrowLeft } from 'lucide-react';
 import type { AppRoute } from '../utils/router';
 
 interface HeaderProps {
@@ -19,7 +19,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
         <h1 className="brand-title">Interview Appointment</h1>
       </div>
 
-      {/* Internal navigation tabs - only visible in Staff / Admin / Panelist mode */}
+      {/* Navigation tabs - visible in Staff mode */}
       {!isCandidateView ? (
         <nav className="nav-tabs">
           <button
@@ -28,7 +28,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
             onClick={() => onNavigate('candidate')}
             title="Preview candidate booking portal"
           >
-            <ExternalLink size={14} />
+            <ArrowLeft size={14} />
             Candidate View
           </button>
 
@@ -57,6 +57,30 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
           <span className="pulse-dot"></span>
           <span>Live Sync</span>
         </div>
+
+        {/* Quick switcher in header */}
+        {isCandidateView ? (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onNavigate('admin')}
+            style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem', gap: '0.35rem' }}
+            title="Switch to Recruiter Dashboard and Panel Management"
+          >
+            <ShieldCheck size={14} color="var(--primary)" />
+            Staff Portal
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onNavigate('candidate')}
+            style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem' }}
+            title="Switch back to candidate booking view"
+          >
+            Candidate View
+          </button>
+        )}
       </div>
     </header>
   );

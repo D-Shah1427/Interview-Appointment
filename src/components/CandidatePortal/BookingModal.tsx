@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import type { SlotCapacityInfo, InterviewBooking } from '../../types';
-import { X, Calendar, Clock, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, AlertCircle } from 'lucide-react';
+import { Modal } from '../Common/Modal';
+import { formatInterviewSlotRange } from '../../utils/timeHelpers';
 
 interface BookingModalProps {
   slotTime: string;
@@ -54,40 +56,29 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close-btn" onClick={onClose}>
-          <X size={20} />
-        </button>
-
-        <div style={{ marginBottom: '1rem' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-            Enter Details
-          </h2>
+    <Modal isOpen={true} onClose={onClose} title="Enter Details" maxWidth="540px">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1.5rem',
+          padding: '0.75rem 1rem',
+          background: 'var(--bg-subtle)',
+          borderRadius: 'var(--radius-md)',
+          marginBottom: '1.25rem',
+          border: '1px solid var(--border-subtle)',
+          fontSize: '0.88rem'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--text-primary)', fontWeight: 600 }}>
+          <Calendar size={16} color="var(--primary)" />
+          <span>{selectedDate}</span>
         </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1.5rem',
-            padding: '0.75rem 1rem',
-            background: 'var(--bg-subtle)',
-            borderRadius: 'var(--radius-md)',
-            marginBottom: '1.25rem',
-            border: '1px solid var(--border-subtle)',
-            fontSize: '0.88rem'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--text-primary)', fontWeight: 600 }}>
-            <Calendar size={16} color="var(--primary)" />
-            <span>{selectedDate}</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--text-primary)', fontWeight: 600 }}>
-            <Clock size={16} color="var(--primary)" />
-            <span>{slotTime} (60 mins)</span>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--text-primary)', fontWeight: 600 }}>
+          <Clock size={16} color="var(--primary)" />
+          <span>{formatInterviewSlotRange(slotTime)} (30 mins)</span>
         </div>
+      </div>
 
         {errorMsg && (
           <div
@@ -188,7 +179,6 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </Modal>
   );
 };

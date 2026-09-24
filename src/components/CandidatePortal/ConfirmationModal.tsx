@@ -5,6 +5,7 @@ import { downloadICSFile } from '../../utils/icsGenerator';
 import { generateGoogleCalendarUrl } from '../../utils/meetingGenerator';
 import { emailService, SentEmailNotification } from '../../services/emailService';
 import { CheckCircle2, Calendar, Clock, Mail, Download, ShieldCheck, ChevronDown, ChevronUp } from 'lucide-react';
+import { Modal } from '../Common/Modal';
 
 interface ConfirmationModalProps {
   booking: InterviewBooking;
@@ -38,9 +39,8 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ booking, o
   const adminEmailObj = sentEmails.find(e => e.recipientType === 'admin');
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content animate-fade-in" style={{ maxWidth: '580px' }}>
-        <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+    <Modal isOpen={true} onClose={onClose} maxWidth="580px" showCloseButton={true}>
+      <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
           <div
             style={{
               width: '52px',
@@ -279,7 +279,6 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ booking, o
             Done
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 };

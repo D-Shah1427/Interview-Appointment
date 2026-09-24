@@ -133,6 +133,18 @@ class StorageService {
     this.savePanelMembers(list);
   }
 
+  public deletePanelMember(memberId: string) {
+    const list = this.getPanelMembers().filter(p => p.id !== memberId);
+    this.savePanelMembers(list);
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      eventType: 'PANEL_UPDATED',
+      title: 'Panelist Removed',
+      description: 'A panelist was removed from the active interview pool.'
+    });
+  }
+
   // --- Stages ---
   public getStages(): InterviewStage[] {
     try {
