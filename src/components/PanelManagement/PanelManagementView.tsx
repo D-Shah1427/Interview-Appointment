@@ -32,6 +32,9 @@ export const PanelManagementView: React.FC = () => {
     { start: '09:00', end: '17:00' }
   ]);
   const [editScope, setEditScope] = useState<'date' | 'all'>('date');
+  const [memberToDelete, setMemberToDelete] = useState<PanelMember | null>(null);
+  const [editHoursError, setEditHoursError] = useState<string | null>(null);
+  const [addMemberError, setAddMemberError] = useState<string | null>(null);
 
   const filteredMembers = panelMembers.filter(m => {
     const matchesSearch = m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -155,17 +158,19 @@ export const PanelManagementView: React.FC = () => {
     if (!editingMember) return;
 
     if (editWindows.length === 0) {
-      alert('Please configure at least one availability window.');
+      setEditHoursError('Please configure at least one availability window.');
       return;
     }
 
     for (let i = 0; i < editWindows.length; i++) {
       const w = editWindows[i];
       if (w.start >= w.end) {
-        alert(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
+        setEditHoursError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
         return;
       }
     }
+
+    setEditHoursError(null);
 
     if (editScope === 'date') {
       const updatedOverrides = {
@@ -195,9 +200,7 @@ export const PanelManagementView: React.FC = () => {
   };
 
   const handleDeleteMember = (member: PanelMember) => {
-    if (window.confirm(`Remove ${member.name} from the panel pool? This will immediately update interview slot availability.`)) {
-      deletePanelMember(member.id);
-    }
+    setMemberToDelete(member);
   };
 
   const handleAddMember = (e: React.FormEvent) => {
@@ -205,17 +208,19 @@ export const PanelManagementView: React.FC = () => {
     if (!newName.trim() || !newEmail.trim()) return;
 
     if (newWindows.length === 0) {
-      alert('Please configure at least one availability window.');
+      setAddMemberError('Please configure at least one availability window.');
       return;
     }
 
     for (let i = 0; i < newWindows.length; i++) {
       const w = newWindows[i];
       if (w.start >= w.end) {
-        alert(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
+        setAddMemberError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
         return;
       }
     }
+
+    setAddMemberError(null);
 
     addPanelMember({
       name: newName.trim(),
@@ -502,6 +507,22 @@ export const PanelManagementView: React.FC = () => {
         maxWidth="540px"
       >
         <form onSubmit={handleSaveHours}>
+          {editHoursError && (
+            <div
+              style={{
+                color: 'var(--color-danger)',
+                background: 'var(--color-danger-bg)',
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                border: '1px solid var(--color-danger-border)',
+                marginBottom: '1rem'
+              }}
+            >
+              {editHoursError}
+            </div>
+          )}
           <div className="form-group" style={{ marginBottom: '1rem' }}>
             <label className="form-label">Apply Hours To</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.35rem' }}>
@@ -694,6 +715,22 @@ export const PanelManagementView: React.FC = () => {
         maxWidth="540px"
       >
         <form onSubmit={handleAddMember}>
+          {addMemberError && (
+            <div
+              style={{
+                color: 'var(--color-danger)',
+                background: 'var(--color-danger-bg)',
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                border: '1px solid var(--color-danger-border)',
+                marginBottom: '1rem'
+              }}
+            >
+              {addMemberError}
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label">Full Name *</label>
             <input
@@ -854,6 +891,42 @@ export const PanelManagementView: React.FC = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Panel Member Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(memberToDelete)}
+        onClose={() => setMemberToDelete(null)}
+        title="Remove Panel Member"
+        maxWidth="440px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+            Are you sure you want to remove <strong>{memberToDelete?.name}</strong> from the interviewer panel pool? This will immediately recalculate open slots.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setMemberToDelete(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+              onClick={() => {
+                if (memberToDelete) {
+                  deletePanelMember(memberToDelete.id);
+                  setMemberToDelete(null);
+                }
+              }}
+            >
+              Confirm Remove
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

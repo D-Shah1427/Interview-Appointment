@@ -11,6 +11,46 @@ const STORAGE_KEYS = {
 
 const CHANNEL_NAME = 'interview_platform_sync_channel';
 
+// In-Memory Storage Cache for sandboxed iframes (e.g. Google Sites) where localStorage access may be blocked
+const memoryStore: Record<string, string> = {};
+
+function safeGetItem(key: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const val = window.localStorage.getItem(key);
+      if (val !== null) {
+        memoryStore[key] = val;
+        return val;
+      }
+    }
+  } catch (e) {
+    // Cross-origin iframe or third-party storage restrictions
+  }
+  return memoryStore[key] !== undefined ? memoryStore[key] : null;
+}
+
+function safeSetItem(key: string, value: string): void {
+  memoryStore[key] = value;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
+    }
+  } catch (e) {
+    // Cross-origin iframe or third-party storage restrictions - fallback to memoryStore
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  delete memoryStore[key];
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key);
+    }
+  } catch (e) {
+    // Cross-origin iframe or third-party storage restrictions
+  }
+}
+
 // Web Audio API for subtle micro-feedback
 export function playChime(type: 'success' | 'alert' | 'lock') {
   try {
@@ -24,17 +64,15 @@ export function playChime(type: 'success' | 'alert' | 'lock') {
 
     const now = ctx.currentTime;
     if (type === 'success') {
-      // Pleasant high double chime
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, now); // C5
-      osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
-      osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.setValueAtTime(659.25, now + 0.1);
+      osc.frequency.setValueAtTime(783.99, now + 0.2);
       gain.gain.setValueAtTime(0.12, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
       osc.start(now);
       osc.stop(now + 0.5);
     } else if (type === 'alert') {
-      // Gentle notification pulse
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(440, now);
       osc.frequency.setValueAtTime(554.37, now + 0.12);
@@ -43,7 +81,6 @@ export function playChime(type: 'success' | 'alert' | 'lock') {
       osc.start(now);
       osc.stop(now + 0.35);
     } else {
-      // Soft lock tap
       osc.type = 'sine';
       osc.frequency.setValueAtTime(320, now);
       osc.frequency.exponentialRampToValueAtTime(220, now + 0.2);
@@ -62,19 +99,28 @@ class StorageService {
   private listeners: Array<(event: any) => void> = [];
 
   constructor() {
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      this.channel = new BroadcastChannel(CHANNEL_NAME);
-      this.channel.onmessage = (event) => {
-        this.notifyListeners(event.data);
-      };
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        this.channel = new BroadcastChannel(CHANNEL_NAME);
+        this.channel.onmessage = (event) => {
+          this.notifyListeners(event.data);
+        };
+      }
+    } catch (e) {
+      // BroadcastChannel can throw in sandboxed iframes without same-origin
+      this.channel = null;
     }
 
-    if (typeof window !== 'undefined') {
-      window.addEventListener('storage', (event) => {
-        if (event.key && Object.values(STORAGE_KEYS).includes(event.key)) {
-          this.notifyListeners({ type: 'STORAGE_CHANGE', key: event.key });
-        }
-      });
+    try {
+      if (typeof window !== 'undefined') {
+        window.addEventListener('storage', (event) => {
+          if (event.key && Object.values(STORAGE_KEYS).includes(event.key)) {
+            this.notifyListeners({ type: 'STORAGE_CHANGE', key: event.key });
+          }
+        });
+      }
+    } catch (e) {
+      // Ignore storage event listener errors
     }
   }
 
@@ -97,7 +143,11 @@ class StorageService {
 
   public broadcast(event: any) {
     if (this.channel) {
-      this.channel.postMessage(event);
+      try {
+        this.channel.postMessage(event);
+      } catch (e) {
+        // Channel postMessage might fail if disconnected
+      }
     }
     // Also notify internal window listeners
     this.notifyListeners(event);
@@ -106,20 +156,25 @@ class StorageService {
   // --- Panel Members ---
   public getPanelMembers(): PanelMember[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.PANEL_MEMBERS);
+      const data = safeGetItem(STORAGE_KEYS.PANEL_MEMBERS);
       if (!data) {
         this.savePanelMembers(INITIAL_PANEL_MEMBERS);
         return INITIAL_PANEL_MEMBERS;
       }
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_PANEL_MEMBERS;
     } catch {
       return INITIAL_PANEL_MEMBERS;
     }
   }
 
   public savePanelMembers(members: PanelMember[]) {
-    localStorage.setItem(STORAGE_KEYS.PANEL_MEMBERS, JSON.stringify(members));
-    this.broadcast({ type: 'PANEL_MEMBERS_UPDATED', members });
+    try {
+      safeSetItem(STORAGE_KEYS.PANEL_MEMBERS, JSON.stringify(members));
+      this.broadcast({ type: 'PANEL_MEMBERS_UPDATED', members });
+    } catch (e) {
+      console.error('Failed to save panel members:', e);
+    }
   }
 
   public updatePanelMember(updated: PanelMember) {
@@ -148,7 +203,7 @@ class StorageService {
   // --- Stages ---
   public getStages(): InterviewStage[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.STAGES);
+      const data = safeGetItem(STORAGE_KEYS.STAGES);
       if (!data) {
         this.saveStages(INITIAL_INTERVIEW_STAGES);
         return INITIAL_INTERVIEW_STAGES;
@@ -160,13 +215,17 @@ class StorageService {
   }
 
   public saveStages(stages: InterviewStage[]) {
-    localStorage.setItem(STORAGE_KEYS.STAGES, JSON.stringify(stages));
+    try {
+      safeSetItem(STORAGE_KEYS.STAGES, JSON.stringify(stages));
+    } catch (e) {
+      console.error('Failed to save stages:', e);
+    }
   }
 
   // --- Bookings ---
   public getBookings(): InterviewBooking[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.BOOKINGS);
+      const data = safeGetItem(STORAGE_KEYS.BOOKINGS);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
@@ -176,7 +235,7 @@ class StorageService {
   public saveBooking(booking: InterviewBooking): void {
     const bookings = this.getBookings();
     bookings.push(booking);
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
+    safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
 
     // Update panelists interview counts
     const members = this.getPanelMembers();
@@ -186,7 +245,7 @@ class StorageService {
         target.totalInterviewsConducted = (target.totalInterviewsConducted || 0) + 1;
       }
     });
-    localStorage.setItem(STORAGE_KEYS.PANEL_MEMBERS, JSON.stringify(members));
+    safeSetItem(STORAGE_KEYS.PANEL_MEMBERS, JSON.stringify(members));
 
     // Add Audit Log
     this.addAuditLog({
@@ -211,7 +270,7 @@ class StorageService {
     if (!target) return;
 
     target.status = 'cancelled';
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
+    safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
 
     this.addAuditLog({
       id: `audit-${Date.now()}`,
@@ -231,7 +290,7 @@ class StorageService {
   // --- Audit Logs ---
   public getAuditLogs(): AuditLogEntry[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS);
+      const data = safeGetItem(STORAGE_KEYS.AUDIT_LOGS);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
@@ -243,14 +302,14 @@ class StorageService {
     logs.unshift(entry);
     // Keep last 100 entries
     if (logs.length > 100) logs.pop();
-    localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(logs));
+    safeSetItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(logs));
     this.broadcast({ type: 'AUDIT_LOG_ADDED', entry });
   }
 
   // --- Reset All Data ---
   public resetToDefaultSeed() {
-    localStorage.removeItem(STORAGE_KEYS.BOOKINGS);
-    localStorage.removeItem(STORAGE_KEYS.ACTIVE_HOLDS);
+    safeRemoveItem(STORAGE_KEYS.BOOKINGS);
+    safeRemoveItem(STORAGE_KEYS.ACTIVE_HOLDS);
     this.savePanelMembers(INITIAL_PANEL_MEMBERS);
     this.saveStages(INITIAL_INTERVIEW_STAGES);
 
@@ -261,7 +320,7 @@ class StorageService {
       title: 'Platform System Initialized',
       description: 'Reset platform to default state with 14 active panel members and dynamic matching rules configured.'
     };
-    localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify([initialAudit]));
+    safeSetItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify([initialAudit]));
 
     this.broadcast({ type: 'DATA_RESET' });
   }

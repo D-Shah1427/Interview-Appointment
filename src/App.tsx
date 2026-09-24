@@ -113,7 +113,7 @@ export function AppContent() {
             )}
           </div>
         ) : (
-          /* Subtle, discreet staff access icon for recruiters - hidden from normal candidate flow */
+          /* Subtle, discreet staff access link for recruiters/organizers */
           <button
             type="button"
             onClick={() => handleNavigate('admin')}
@@ -121,24 +121,27 @@ export function AppContent() {
             style={{
               background: 'none',
               border: 'none',
-              color: 'var(--border-medium)',
+              color: 'var(--text-muted)',
               cursor: 'pointer',
-              padding: '0.2rem',
+              padding: '0.25rem 0.5rem',
               display: 'inline-flex',
               alignItems: 'center',
-              opacity: 0.35,
+              gap: '0.35rem',
+              fontSize: '0.75rem',
+              opacity: 0.6,
               transition: 'opacity 0.2s ease, color 0.2s ease'
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.opacity = '1';
-              e.currentTarget.style.color = 'var(--text-muted)';
+              e.currentTarget.style.color = 'var(--primary)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.opacity = '0.35';
-              e.currentTarget.style.color = 'var(--border-medium)';
+              e.currentTarget.style.opacity = '0.6';
+              e.currentTarget.style.color = 'var(--text-muted)';
             }}
           >
             <Lock size={12} />
+            <span>Staff Access</span>
           </button>
         )}
       </footer>

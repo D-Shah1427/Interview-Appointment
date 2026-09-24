@@ -3,7 +3,7 @@ import { useInterview } from '../../context/InterviewContext';
 import { emailService } from '../../services/emailService';
 import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff } from 'lucide-react';
 import { getCandidateShareableUrl } from '../../utils/router';
-import { Department, Seniority, TimeWindow, PanelMember } from '../../types';
+import { Department, Seniority, TimeWindow, PanelMember, InterviewBooking } from '../../types';
 import { getQuarterHourOptions } from '../../utils/timeHelpers';
 import { Modal } from '../Common/Modal';
 import { useStaffAuth } from '../../context/StaffAuthContext';
@@ -42,6 +42,12 @@ export const AdminDashboardView: React.FC = () => {
   const [editWindows, setEditWindows] = useState<TimeWindow[]>([]);
   const [editScope, setEditScope] = useState<'date' | 'all'>('date');
 
+  // Deletion & Confirmation Modal States (non-blocking for Google Sites iframe compatibility)
+  const [memberToDelete, setMemberToDelete] = useState<PanelMember | null>(null);
+  const [bookingToCancel, setBookingToCancel] = useState<InterviewBooking | null>(null);
+  const [editHoursError, setEditHoursError] = useState<string | null>(null);
+  const [addPanelistError, setAddPanelistError] = useState<string | null>(null);
+
   const candidateUrl = getCandidateShareableUrl();
   const handleCopyLink = () => {
     navigator.clipboard.writeText(candidateUrl);
@@ -76,6 +82,7 @@ export const AdminDashboardView: React.FC = () => {
   const openEditHours = (member: PanelMember) => {
     setEditingMember(member);
     setTargetDate(selectedDate);
+    setEditHoursError(null);
 
     const dateOverride = member.dateOverrides?.[selectedDate];
     if (Array.isArray(dateOverride) && dateOverride.length > 0) {
@@ -119,17 +126,19 @@ export const AdminDashboardView: React.FC = () => {
     if (!editingMember) return;
 
     if (editWindows.length === 0) {
-      alert('Please configure at least one availability window.');
+      setEditHoursError('Please configure at least one availability window.');
       return;
     }
 
     for (let i = 0; i < editWindows.length; i++) {
       const w = editWindows[i];
       if (w.start >= w.end) {
-        alert(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
+        setEditHoursError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
         return;
       }
     }
+
+    setEditHoursError(null);
 
     if (editScope === 'date') {
       const updatedOverrides = {
@@ -163,17 +172,19 @@ export const AdminDashboardView: React.FC = () => {
     if (!newName.trim() || !newEmail.trim()) return;
 
     if (newWindows.length === 0) {
-      alert('Please configure at least one availability window.');
+      setAddPanelistError('Please configure at least one availability window.');
       return;
     }
 
     for (let i = 0; i < newWindows.length; i++) {
       const w = newWindows[i];
       if (w.start >= w.end) {
-        alert(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
+        setAddPanelistError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
         return;
       }
     }
+
+    setAddPanelistError(null);
 
     addPanelMember({
       name: newName.trim(),
@@ -538,11 +549,7 @@ export const AdminDashboardView: React.FC = () => {
                       <button
                         type="button"
                         className="btn btn-outline-danger"
-                        onClick={() => {
-                          if (window.confirm(`Cancel interview for ${b.candidateName}? This will instantly unlock the slot for others.`)) {
-                            cancelInterview(b.id);
-                          }
-                        }}
+                        onClick={() => setBookingToCancel(b)}
                         style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
                         title="Cancel interview and release slot back into pool"
                       >
@@ -661,11 +668,7 @@ export const AdminDashboardView: React.FC = () => {
                         <button
                           type="button"
                           className="btn btn-outline-danger"
-                          onClick={() => {
-                            if (window.confirm(`Are you sure you want to remove ${member.name} from the interviewer panel pool? This will immediately recalculate open slots.`)) {
-                              deletePanelMember(member.id);
-                            }
-                          }}
+                          onClick={() => setMemberToDelete(member)}
                           style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
                           title="Remove panelist from pool"
                         >
@@ -822,6 +825,21 @@ export const AdminDashboardView: React.FC = () => {
         maxWidth="540px"
       >
         <form onSubmit={handleAddPanelist} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {addPanelistError && (
+            <div
+              style={{
+                color: 'var(--color-danger)',
+                background: 'var(--color-danger-bg)',
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                border: '1px solid var(--color-danger-border)'
+              }}
+            >
+              {addPanelistError}
+            </div>
+          )}
           <div>
             <label className="input-label" htmlFor="admin-panelist-name">Full Name</label>
             <input
@@ -1012,6 +1030,21 @@ export const AdminDashboardView: React.FC = () => {
       >
         {editingMember && (
           <form onSubmit={handleSaveHours} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {editHoursError && (
+              <div
+                style={{
+                  color: 'var(--color-danger)',
+                  background: 'var(--color-danger-bg)',
+                  padding: '0.65rem 0.85rem',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  border: '1px solid var(--color-danger-border)'
+                }}
+              >
+                {editHoursError}
+              </div>
+            )}
             <div>
               <label className="input-label">Apply Hours To</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.35rem' }}>
@@ -1321,6 +1354,78 @@ export const AdminDashboardView: React.FC = () => {
               </button>
             </div>
           </form>
+        </div>
+      </Modal>
+
+      {/* Cancel Interview Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(bookingToCancel)}
+        onClose={() => setBookingToCancel(null)}
+        title="Cancel Interview Appointment"
+        maxWidth="460px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+            Are you sure you want to cancel the interview for <strong>{bookingToCancel?.candidateName}</strong> scheduled on <strong>{bookingToCancel?.date}</strong> at <strong>{bookingToCancel?.time}</strong>? This will instantly release the slot back into the available pool.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setBookingToCancel(null)}
+            >
+              Keep Booking
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+              onClick={() => {
+                if (bookingToCancel) {
+                  cancelInterview(bookingToCancel.id);
+                  setBookingToCancel(null);
+                }
+              }}
+            >
+              Confirm Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Panel Member Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(memberToDelete)}
+        onClose={() => setMemberToDelete(null)}
+        title="Remove Panel Member"
+        maxWidth="460px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+            Are you sure you want to remove <strong>{memberToDelete?.name}</strong> from the interviewer panel pool? This will immediately recalculate open slots.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setMemberToDelete(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+              onClick={() => {
+                if (memberToDelete) {
+                  deletePanelMember(memberToDelete.id);
+                  setMemberToDelete(null);
+                }
+              }}
+            >
+              Confirm Remove
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
