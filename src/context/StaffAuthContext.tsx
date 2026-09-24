@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
+import { safeGetItem, safeSetItem, safeRemoveItem } from '../services/storage';
+import { cloudSyncService } from '../services/cloudSyncService';
 
 interface StaffAuthContextType {
   isAuthenticated: boolean;
@@ -17,7 +19,7 @@ const StaffAuthContext = createContext<StaffAuthContextType | undefined>(undefin
 export const StaffAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     try {
-      return sessionStorage.getItem(AUTH_SESSION_KEY) === 'true';
+      return safeGetItem(AUTH_SESSION_KEY) === 'true';
     } catch {
       return false;
     }
@@ -25,22 +27,18 @@ export const StaffAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [currentPasscode, setCurrentPasscode] = useState<string>(() => {
     try {
-      return localStorage.getItem(PASSCODE_STORAGE_KEY) || DEFAULT_PASSCODE;
+      return safeGetItem(PASSCODE_STORAGE_KEY) || DEFAULT_PASSCODE;
     } catch {
       return DEFAULT_PASSCODE;
     }
   });
 
   const login = (enteredPasscode: string): boolean => {
-    // Check against configured passcode or default fallback
     const trimmed = enteredPasscode.trim();
-    if (trimmed === currentPasscode || trimmed === DEFAULT_PASSCODE) {
+    // Strictly check against the current configured passcode only
+    if (trimmed === currentPasscode) {
       setIsAuthenticated(true);
-      try {
-        sessionStorage.setItem(AUTH_SESSION_KEY, 'true');
-      } catch (e) {
-        console.error('Session storage error:', e);
-      }
+      safeSetItem(AUTH_SESSION_KEY, 'true');
       return true;
     }
     return false;
@@ -48,15 +46,12 @@ export const StaffAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const logout = () => {
     setIsAuthenticated(false);
-    try {
-      sessionStorage.removeItem(AUTH_SESSION_KEY);
-    } catch (e) {
-      console.error('Session storage error:', e);
-    }
+    safeRemoveItem(AUTH_SESSION_KEY);
   };
 
   const updatePasscode = (current: string, next: string): { success: boolean; message: string } => {
-    if (current.trim() !== currentPasscode && current.trim() !== DEFAULT_PASSCODE) {
+    // Current passcode must match active passcode
+    if (current.trim() !== currentPasscode) {
       return { success: false, message: 'Current passcode is incorrect.' };
     }
     if (!next || next.trim().length < 4) {
@@ -65,10 +60,9 @@ export const StaffAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const cleanNext = next.trim();
     setCurrentPasscode(cleanNext);
-    try {
-      localStorage.setItem(PASSCODE_STORAGE_KEY, cleanNext);
-    } catch (e) {
-      console.error('Local storage error:', e);
+    safeSetItem(PASSCODE_STORAGE_KEY, cleanNext);
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({ passcode: cleanNext });
     }
     return { success: true, message: 'Staff passcode updated successfully.' };
   };

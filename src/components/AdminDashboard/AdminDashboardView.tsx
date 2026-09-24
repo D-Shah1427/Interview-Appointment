@@ -1,18 +1,31 @@
 import React, { useState } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import { emailService } from '../../services/emailService';
-import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff } from 'lucide-react';
+import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff, Cloud, RefreshCw, Download, Upload } from 'lucide-react';
 import { getCandidateShareableUrl } from '../../utils/router';
 import { Department, Seniority, TimeWindow, PanelMember, InterviewBooking } from '../../types';
 import { getQuarterHourOptions, getMemberHoursForDate, DAY_CONFIG } from '../../utils/timeHelpers';
 import { Modal } from '../Common/Modal';
 import { useStaffAuth } from '../../context/StaffAuthContext';
 import { PanelScheduleModal } from '../PanelManagement/PanelScheduleModal';
+import { cloudSyncService } from '../../services/cloudSyncService';
+import { storageService, safeSetItem } from '../../services/storage';
 
 const quarterHourOptions = getQuarterHourOptions(7, 20);
 
 export const AdminDashboardView: React.FC = () => {
-  const { bookings, panelMembers, auditLogs, cancelInterview, addPanelMember, deletePanelMember, updatePanelMember, selectedDate } = useInterview();
+  const {
+    bookings,
+    panelMembers,
+    auditLogs,
+    cancelInterview,
+    addPanelMember,
+    deletePanelMember,
+    updatePanelMember,
+    selectedDate,
+    triggerCloudSync,
+    isCloudConfigured
+  } = useInterview();
   const { currentPasscode, updatePasscode } = useStaffAuth();
   const [activeTab, setActiveTab] = useState<'bookings' | 'panelists' | 'emails'>('bookings');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -49,6 +62,92 @@ export const AdminDashboardView: React.FC = () => {
     navigator.clipboard.writeText(candidateUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
+  };
+
+  // Cloud Sync Modal State
+  const [showCloudModal, setShowCloudModal] = useState(false);
+  const [cloudUrlInput, setCloudUrlInput] = useState(() => cloudSyncService.getSyncUrl() || '');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showGasInstructions, setShowGasInstructions] = useState(false);
+  const [copiedGasScript, setCopiedGasScript] = useState(false);
+
+  const handleSaveSyncUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    cloudSyncService.setSyncUrl(cloudUrlInput);
+    if (!cloudUrlInput.trim()) {
+      setSyncStatusMsg({ type: 'success', message: 'Cloud sync disconnected. Operating in local storage mode.' });
+      return;
+    }
+    setIsSyncing(true);
+    setSyncStatusMsg(null);
+    try {
+      const ok = await triggerCloudSync();
+      if (ok) {
+        setSyncStatusMsg({ type: 'success', message: 'Connected and synchronized with Google Sheet / Cloud successfully!' });
+      } else {
+        setSyncStatusMsg({ type: 'error', message: 'Connected, but initial data sync failed. Check URL permissions (Access must be "Anyone").' });
+      }
+    } catch (err: any) {
+      setSyncStatusMsg({ type: 'error', message: `Sync error: ${err.message || 'Unable to connect'}` });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    setSyncStatusMsg(null);
+    try {
+      await triggerCloudSync();
+      setSyncStatusMsg({ type: 'success', message: 'Data synced successfully!' });
+    } catch {
+      setSyncStatusMsg({ type: 'error', message: 'Sync failed.' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleExportData = () => {
+    const exportPayload = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      panelMembers,
+      bookings,
+      passcode: currentPasscode
+    };
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `interview-data-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed.panelMembers)) {
+          storageService.savePanelMembers(parsed.panelMembers);
+        }
+        if (Array.isArray(parsed.bookings)) {
+          safeSetItem('interview_bookings_v1', JSON.stringify(parsed.bookings));
+        }
+        if (parsed.passcode) {
+          safeSetItem('staff_portal_passcode', parsed.passcode);
+        }
+        window.location.reload();
+      } catch {
+        alert('Invalid backup JSON file.');
+      }
+    };
+    reader.readAsText(file);
   };
 
   // Multiple Window Handlers for Add
@@ -302,6 +401,20 @@ export const AdminDashboardView: React.FC = () => {
           >
             <KeyRound size={14} color="var(--primary)" />
             Staff Passcode
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              setSyncStatusMsg(null);
+              setShowCloudModal(true);
+            }}
+            style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem', gap: '0.35rem' }}
+            title="Configure real-time Google Sheet / Cloud multi-device synchronization"
+          >
+            <Cloud size={14} color={isCloudConfigured ? '#10b981' : 'var(--text-muted)'} />
+            {isCloudConfigured ? 'Cloud Synced' : 'Cloud Sync'}
           </button>
         </div>
       </div>
@@ -1115,6 +1228,247 @@ export const AdminDashboardView: React.FC = () => {
             >
               Confirm Remove
             </button>
+          </div>
+        </div>
+      </Modal>
+      {/* Real-Time Cloud & Google Sheet Sync Modal */}
+      <Modal
+        isOpen={showCloudModal}
+        onClose={() => setShowCloudModal(false)}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Cloud size={18} color="var(--primary)" />
+            <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              Multi-Device &amp; Google Sheet Sync
+            </span>
+          </div>
+        }
+        subtitle="Synchronize interview bookings, panels, and passcode in real-time across phone, laptop, and candidates."
+        maxWidth="580px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Status Banner */}
+          <div
+            style={{
+              padding: '0.85rem 1rem',
+              borderRadius: 'var(--radius-md)',
+              background: isCloudConfigured ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+              border: `1px solid ${isCloudConfigured ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.75rem'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: isCloudConfigured ? '#059669' : '#b45309' }}>
+                {isCloudConfigured ? '● Cloud Synchronization Active' : '○ Local Storage Mode (Single Device)'}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                {isCloudConfigured
+                  ? 'All devices and candidates share the same live bookings, panels, and passcode.'
+                  : 'Currently data is stored only in this specific browser. Connect a Google Sheet to sync across all devices.'}
+              </div>
+            </div>
+
+            {isCloudConfigured && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isSyncing}
+                onClick={handleManualSync}
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', gap: '0.35rem', flexShrink: 0 }}
+              >
+                <RefreshCw size={13} className={isSyncing ? 'animate-spin' : ''} />
+                {isSyncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            )}
+          </div>
+
+          {syncStatusMsg && (
+            <div
+              style={{
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                background: syncStatusMsg.type === 'success' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                color: syncStatusMsg.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)',
+                border: `1px solid ${syncStatusMsg.type === 'success' ? 'var(--color-success-border)' : 'var(--color-danger-border)'}`
+              }}
+            >
+              {syncStatusMsg.message}
+            </div>
+          )}
+
+          {/* Form to Connect Google Sheet Web App */}
+          <form onSubmit={handleSaveSyncUrl} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <div>
+              <label className="form-label">Google Apps Script Web App URL</label>
+              <input
+                type="url"
+                className="form-input"
+                placeholder="https://script.google.com/macros/s/.../exec"
+                value={cloudUrlInput}
+                onChange={(e) => setCloudUrlInput(e.target.value)}
+              />
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                Leave empty to disconnect and run locally in browser.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowGasInstructions(!showGasInstructions)}
+                style={{ fontSize: '0.78rem' }}
+              >
+                {showGasInstructions ? 'Hide Instructions' : 'How to set up Google Sheet (2 mins)'}
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isSyncing}
+                style={{ fontSize: '0.78rem' }}
+              >
+                {isSyncing ? 'Testing...' : 'Save & Connect'}
+              </button>
+            </div>
+          </form>
+
+          {/* Collapsible Step-by-Step Instructions */}
+          {showGasInstructions && (
+            <div
+              style={{
+                background: 'var(--bg-subtle)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.9rem',
+                fontSize: '0.78rem',
+                lineHeight: 1.5,
+                color: 'var(--text-secondary)'
+              }}
+            >
+              <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                Quick 4-Step Setup with Google Sheets:
+              </div>
+              <ol style={{ paddingLeft: '1.2rem', margin: '0 0 0.75rem' }}>
+                <li>Open a new <strong>Google Sheet</strong> in your Google Drive.</li>
+                <li>Go to <strong>Extensions &gt; Apps Script</strong>.</li>
+                <li>Delete any code in the editor and paste the snippet below:</li>
+              </ol>
+
+              <div style={{ position: 'relative', marginBottom: '0.75rem' }}>
+                <pre
+                  style={{
+                    background: '#1e293b',
+                    color: '#e2e8f0',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.72rem',
+                    overflowX: 'auto',
+                    margin: 0
+                  }}
+                >
+{`function doGet(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
+  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
+  var val = sheet.getRange("A1").getValue();
+  return ContentService.createTextOutput(val || "{}")
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
+  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
+  var data = e.postData.contents;
+  sheet.getRange("A1").setValue(data);
+  return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+    .setMimeType(ContentService.MimeType.JSON);
+}`}
+                </pre>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`function doGet(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
+  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
+  var val = sheet.getRange("A1").getValue();
+  return ContentService.createTextOutput(val || "{}")
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
+  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
+  var data = e.postData.contents;
+  sheet.getRange("A1").setValue(data);
+  return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+    .setMimeType(ContentService.MimeType.JSON);
+}`);
+                    setCopiedGasScript(true);
+                    setTimeout(() => setCopiedGasScript(false), 2000);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: '6px',
+                    right: '6px',
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.5rem'
+                  }}
+                >
+                  {copiedGasScript ? 'Copied!' : 'Copy Script'}
+                </button>
+              </div>
+
+              <ol start={4} style={{ paddingLeft: '1.2rem', margin: 0 }}>
+                <li>Click <strong>Deploy &gt; New deployment</strong>, select <strong>Web App</strong>, set <em>Who has access</em> to <strong>Anyone</strong>, click <strong>Deploy</strong>, and paste the generated URL above!</li>
+              </ol>
+            </div>
+          )}
+
+          {/* Backup / Export / Import */}
+          <div
+            style={{
+              borderTop: '1px solid var(--border-subtle)',
+              paddingTop: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.65rem'
+            }}
+          >
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              Data Backup &amp; Instant Device Migration
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              You can also export your configured panelists, bookings, and passcode as a JSON file and import it directly into your phone or any other browser:
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleExportData}
+                style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+              >
+                <Download size={13} />
+                Export Backup (JSON)
+              </button>
+              <label
+                className="btn btn-secondary"
+                style={{ fontSize: '0.78rem', gap: '0.35rem', cursor: 'pointer', margin: 0 }}
+              >
+                <Upload size={13} />
+                Import Backup (JSON)
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  style={{ display: 'none' }}
+                  onChange={handleImportFile}
+                />
+              </label>
+            </div>
           </div>
         </div>
       </Modal>

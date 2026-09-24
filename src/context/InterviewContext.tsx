@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { PanelMember, InterviewBooking, SlotCapacityInfo, AuditLogEntry } from '../types';
-import { storageService, playChime } from '../services/storage';
+import { storageService, playChime, safeGetItem, safeSetItem } from '../services/storage';
 import { calculateSlotCapacity, dynamicallySelectPanel } from '../services/panelMatcher';
 import { emailService } from '../services/emailService';
 import { getUpcomingWeekdays } from '../utils/dateHelpers';
+import { cloudSyncService } from '../services/cloudSyncService';
 
 interface InterviewContextType {
   panelMembers: PanelMember[];
@@ -29,6 +30,8 @@ interface InterviewContextType {
   resetData: () => void;
   liveAlert: { id: string; message: string; type: 'lock' | 'booking' | 'info' } | null;
   dismissLiveAlert: () => void;
+  triggerCloudSync: () => Promise<boolean>;
+  isCloudConfigured: boolean;
 }
 
 const InterviewContext = createContext<InterviewContextType | undefined>(undefined);
@@ -37,6 +40,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [panelMembers, setPanelMembers] = useState<PanelMember[]>(() => storageService.getPanelMembers());
   const [bookings, setBookings] = useState<InterviewBooking[]>(() => storageService.getBookings());
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => storageService.getAuditLogs());
+  const [isCloudConfigured, setIsCloudConfigured] = useState<boolean>(() => cloudSyncService.isConfigured());
 
   const availableDates = useMemo(() => getUpcomingWeekdays(14), []);
   const [selectedDate, setSelectedDate] = useState<string>(availableDates[0]?.dateStr || '');
@@ -51,7 +55,37 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setPanelMembers(storageService.getPanelMembers());
     setBookings(storageService.getBookings());
     setAuditLogs(storageService.getAuditLogs());
+    setIsCloudConfigured(cloudSyncService.isConfigured());
   }, []);
+
+  const triggerCloudSync = useCallback(async (): Promise<boolean> => {
+    if (!cloudSyncService.isConfigured()) return false;
+    try {
+      const remote = await cloudSyncService.pullFromCloud();
+      if (remote) {
+        if (Array.isArray(remote.panelMembers)) {
+          storageService.savePanelMembers(remote.panelMembers);
+        }
+        if (Array.isArray(remote.bookings)) {
+          safeSetItem('interview_bookings_v1', JSON.stringify(remote.bookings));
+        }
+        if (remote.passcode) {
+          safeSetItem('staff_portal_passcode', remote.passcode);
+        }
+        reloadFromStorage();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, [reloadFromStorage]);
+
+  // Initial cloud sync pull on mount
+  useEffect(() => {
+    if (cloudSyncService.isConfigured()) {
+      triggerCloudSync();
+    }
+  }, [triggerCloudSync]);
 
   useEffect(() => {
     const unsubscribe = storageService.subscribe((event) => {
@@ -130,17 +164,37 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     reloadFromStorage();
     playChime('success');
 
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        bookings: storageService.getBookings(),
+        panelMembers: storageService.getPanelMembers(),
+        passcode: safeGetItem('staff_portal_passcode') || undefined
+      });
+    }
+
     return newBooking;
   }, [panelMembers, bookings, reloadFromStorage]);
 
   const cancelInterview = useCallback((bookingId: string) => {
     storageService.cancelBooking(bookingId);
     reloadFromStorage();
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        bookings: storageService.getBookings(),
+        panelMembers: storageService.getPanelMembers()
+      });
+    }
   }, [reloadFromStorage]);
 
   const updatePanelMember = useCallback((member: PanelMember) => {
     storageService.updatePanelMember(member);
     reloadFromStorage();
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        panelMembers: storageService.getPanelMembers(),
+        bookings: storageService.getBookings()
+      });
+    }
   }, [reloadFromStorage]);
 
   const addPanelMember = useCallback((data: Omit<PanelMember, 'id' | 'totalInterviewsConducted'>) => {
@@ -151,16 +205,34 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
     storageService.updatePanelMember(newMember);
     reloadFromStorage();
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        panelMembers: storageService.getPanelMembers(),
+        bookings: storageService.getBookings()
+      });
+    }
   }, [reloadFromStorage]);
 
   const deletePanelMember = useCallback((memberId: string) => {
     storageService.deletePanelMember(memberId);
     reloadFromStorage();
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        panelMembers: storageService.getPanelMembers(),
+        bookings: storageService.getBookings()
+      });
+    }
   }, [reloadFromStorage]);
 
   const resetData = useCallback(() => {
     storageService.resetToDefaultSeed();
     reloadFromStorage();
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        panelMembers: [],
+        bookings: []
+      });
+    }
     setLiveAlert({
       id: String(Date.now()),
       message: 'System data reset to default.',
@@ -185,7 +257,9 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         deletePanelMember,
         resetData,
         liveAlert,
-        dismissLiveAlert
+        dismissLiveAlert,
+        triggerCloudSync,
+        isCloudConfigured
       }}
     >
       {children}

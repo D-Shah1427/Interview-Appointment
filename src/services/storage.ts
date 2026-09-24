@@ -14,7 +14,7 @@ const CHANNEL_NAME = 'interview_platform_sync_channel';
 // In-Memory Storage Cache for sandboxed iframes (e.g. Google Sites) where localStorage access may be blocked
 const memoryStore: Record<string, string> = {};
 
-function safeGetItem(key: string): string | null {
+export function safeGetItem(key: string): string | null {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       const val = window.localStorage.getItem(key);
@@ -29,7 +29,7 @@ function safeGetItem(key: string): string | null {
   return memoryStore[key] !== undefined ? memoryStore[key] : null;
 }
 
-function safeSetItem(key: string, value: string): void {
+export function safeSetItem(key: string, value: string): void {
   memoryStore[key] = value;
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -40,7 +40,7 @@ function safeSetItem(key: string, value: string): void {
   }
 }
 
-function safeRemoveItem(key: string): void {
+export function safeRemoveItem(key: string): void {
   delete memoryStore[key];
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -157,12 +157,12 @@ class StorageService {
   public getPanelMembers(): PanelMember[] {
     try {
       const data = safeGetItem(STORAGE_KEYS.PANEL_MEMBERS);
-      if (!data) {
+      if (data === null) {
         this.savePanelMembers(INITIAL_PANEL_MEMBERS);
         return INITIAL_PANEL_MEMBERS;
       }
       const parsed = JSON.parse(data);
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_PANEL_MEMBERS;
+      return Array.isArray(parsed) ? parsed : INITIAL_PANEL_MEMBERS;
     } catch {
       return INITIAL_PANEL_MEMBERS;
     }
