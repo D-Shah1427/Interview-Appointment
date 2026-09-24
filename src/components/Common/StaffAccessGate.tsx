@@ -134,7 +134,7 @@ export const StaffAccessGate: React.FC<StaffAccessGateProps> = ({
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
             >
               <span>Staff Passcode</span>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Default: admin2026</span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Default: admin2026 or admin</span>
             </label>
 
             <div style={{ position: 'relative' }}>
