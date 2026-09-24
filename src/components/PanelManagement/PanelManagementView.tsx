@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import type { PanelMember, Department, TimeWindow } from '../../types';
-import { Users, Search, Plus, Clock, X, Award, Trash2, Edit3, Calendar } from 'lucide-react';
-import { getQuarterHourOptions } from '../../utils/timeHelpers';
+import { Search, Plus, Clock, Award, Trash2, Edit3, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
+import { getQuarterHourOptions, getMemberHoursForDate, DAY_CONFIG } from '../../utils/timeHelpers';
 import { Modal } from '../Common/Modal';
+import { PanelScheduleModal } from './PanelScheduleModal';
 
 const quarterHourOptions = getQuarterHourOptions(7, 20);
 
@@ -20,20 +21,15 @@ export const PanelManagementView: React.FC = () => {
   const [newRole, setNewRole] = useState('');
   const [newDept, setNewDept] = useState<Department>('Engineering');
   const [newSkills, setNewSkills] = useState('System Design, Architecture');
+  const [addScheduleType, setAddScheduleType] = useState<'preset-split' | 'preset-standard' | 'custom'>('preset-split');
   const [newWindows, setNewWindows] = useState<TimeWindow[]>([
-    { start: '09:00', end: '13:00' },
-    { start: '14:00', end: '17:00' }
+    { start: '10:00', end: '13:00' }
   ]);
 
-  // Edit hours form state
+  // Modal states
   const [editingMember, setEditingMember] = useState<PanelMember | null>(null);
-  const [targetDate, setTargetDate] = useState(selectedDate);
-  const [editWindows, setEditWindows] = useState<TimeWindow[]>([
-    { start: '09:00', end: '17:00' }
-  ]);
-  const [editScope, setEditScope] = useState<'date' | 'all'>('date');
+  const [expandedWeeklyId, setExpandedWeeklyId] = useState<string | null>(null);
   const [memberToDelete, setMemberToDelete] = useState<PanelMember | null>(null);
-  const [editHoursError, setEditHoursError] = useState<string | null>(null);
   const [addMemberError, setAddMemberError] = useState<string | null>(null);
 
   const filteredMembers = panelMembers.filter(m => {
@@ -43,21 +39,6 @@ export const PanelManagementView: React.FC = () => {
     const matchesDept = filterDept === 'All' || m.department === filterDept;
     return matchesSearch && matchesDept;
   });
-
-  const getMemberHoursSummary = (member: PanelMember, dateStr: string) => {
-    if (member.dateOverrides?.[dateStr] === false) {
-      return 'Out of Office';
-    }
-    const dateOverride = member.dateOverrides?.[dateStr];
-    if (Array.isArray(dateOverride) && dateOverride.length > 0) {
-      return `${dateOverride.map(w => `${w.start} - ${w.end}`).join(', ')} (${dateStr})`;
-    }
-    const mondayWindows = member.weeklySchedule[1] || member.weeklySchedule[2] || [];
-    if (mondayWindows.length > 0) {
-      return mondayWindows.map(w => `${w.start} - ${w.end}`).join(', ');
-    }
-    return '09:00 - 17:00';
-  };
 
   const handleToggleOOO = (member: PanelMember) => {
     const currentOverrides = member.dateOverrides || {};
@@ -76,58 +57,6 @@ export const PanelManagementView: React.FC = () => {
 
   const openEditHours = (member: PanelMember) => {
     setEditingMember(member);
-    setTargetDate(selectedDate);
-
-    const dateOverride = member.dateOverrides?.[selectedDate];
-    if (Array.isArray(dateOverride) && dateOverride.length > 0) {
-      setEditWindows([...dateOverride]);
-      setEditScope('date');
-    } else {
-      const mondayWindows = member.weeklySchedule[1] || member.weeklySchedule[2] || [];
-      if (mondayWindows.length > 0) {
-        setEditWindows([...mondayWindows]);
-      } else {
-        setEditWindows([{ start: '09:00', end: '17:00' }]);
-      }
-      setEditScope('date');
-    }
-  };
-
-  const handleDateChange = (newDate: string) => {
-    setTargetDate(newDate);
-    if (!editingMember) return;
-    const override = editingMember.dateOverrides?.[newDate];
-    if (Array.isArray(override) && override.length > 0) {
-      setEditWindows([...override]);
-    } else {
-      const mondayWindows = editingMember.weeklySchedule[1] || [];
-      if (mondayWindows.length > 0) {
-        setEditWindows([...mondayWindows]);
-      }
-    }
-  };
-
-  // Multiple Window Handlers for Edit
-  const addEditWindow = () => {
-    const lastWin = editWindows[editWindows.length - 1];
-    let defaultStart = '14:00';
-    let defaultEnd = '18:00';
-    if (lastWin) {
-      defaultStart = lastWin.end;
-      const [h] = defaultStart.split(':').map(Number);
-      const nextH = Math.min(20, h + 2);
-      defaultEnd = `${String(nextH).padStart(2, '0')}:00`;
-    }
-    setEditWindows(prev => [...prev, { start: defaultStart, end: defaultEnd }]);
-  };
-
-  const removeEditWindow = (index: number) => {
-    if (editWindows.length <= 1) return;
-    setEditWindows(prev => prev.filter((_, idx) => idx !== index));
-  };
-
-  const updateEditWindow = (index: number, field: 'start' | 'end', value: string) => {
-    setEditWindows(prev => prev.map((w, idx) => idx === index ? { ...w, [field]: value } : w));
   };
 
   // Multiple Window Handlers for Add
@@ -153,52 +82,6 @@ export const PanelManagementView: React.FC = () => {
     setNewWindows(prev => prev.map((w, idx) => idx === index ? { ...w, [field]: value } : w));
   };
 
-  const handleSaveHours = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingMember) return;
-
-    if (editWindows.length === 0) {
-      setEditHoursError('Please configure at least one availability window.');
-      return;
-    }
-
-    for (let i = 0; i < editWindows.length; i++) {
-      const w = editWindows[i];
-      if (w.start >= w.end) {
-        setEditHoursError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
-        return;
-      }
-    }
-
-    setEditHoursError(null);
-
-    if (editScope === 'date') {
-      const updatedOverrides = {
-        ...(editingMember.dateOverrides || {}),
-        [targetDate]: [...editWindows]
-      };
-      updatePanelMember({
-        ...editingMember,
-        dateOverrides: updatedOverrides as any
-      });
-    } else {
-      const newWeekly: Record<number, TimeWindow[]> = {
-        ...editingMember.weeklySchedule,
-        1: [...editWindows],
-        2: [...editWindows],
-        3: [...editWindows],
-        4: [...editWindows],
-        5: [...editWindows]
-      };
-      updatePanelMember({
-        ...editingMember,
-        weeklySchedule: newWeekly
-      });
-    }
-
-    setEditingMember(null);
-  };
-
   const handleDeleteMember = (member: PanelMember) => {
     setMemberToDelete(member);
   };
@@ -207,17 +90,65 @@ export const PanelManagementView: React.FC = () => {
     e.preventDefault();
     if (!newName.trim() || !newEmail.trim()) return;
 
-    if (newWindows.length === 0) {
-      setAddMemberError('Please configure at least one availability window.');
-      return;
-    }
+    let memberSchedule: Record<number, TimeWindow[]> = {
+      1: [],
+      2: [],
+      3: [],
+      4: [],
+      5: [],
+      6: [],
+      0: []
+    };
 
-    for (let i = 0; i < newWindows.length; i++) {
-      const w = newWindows[i];
-      if (w.start >= w.end) {
-        setAddMemberError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
+    if (addScheduleType === 'preset-split') {
+      // User scenario: Mon-Wed 10 to 1, Thu Off, Fri 10-11, 12:30-1:15, 3-6
+      memberSchedule = {
+        1: [{ start: '10:00', end: '13:00' }],
+        2: [{ start: '10:00', end: '13:00' }],
+        3: [{ start: '10:00', end: '13:00' }],
+        4: [],
+        5: [
+          { start: '10:00', end: '11:00' },
+          { start: '12:30', end: '13:15' },
+          { start: '15:00', end: '18:00' }
+        ],
+        6: [],
+        0: []
+      };
+    } else if (addScheduleType === 'preset-standard') {
+      const std = [{ start: '09:00', end: '17:00' }];
+      memberSchedule = {
+        1: [...std],
+        2: [...std],
+        3: [...std],
+        4: [...std],
+        5: [...std],
+        6: [],
+        0: []
+      };
+    } else {
+      if (newWindows.length === 0) {
+        setAddMemberError('Please configure at least one availability window.');
         return;
       }
+
+      for (let i = 0; i < newWindows.length; i++) {
+        const w = newWindows[i];
+        if (w.start >= w.end) {
+          setAddMemberError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
+          return;
+        }
+      }
+
+      memberSchedule = {
+        1: [...newWindows],
+        2: [...newWindows],
+        3: [...newWindows],
+        4: [...newWindows],
+        5: [...newWindows],
+        6: [],
+        0: []
+      };
     }
 
     setAddMemberError(null);
@@ -230,15 +161,7 @@ export const PanelManagementView: React.FC = () => {
       skills: newSkills.split(',').map(s => s.trim()).filter(Boolean),
       seniority: 'Senior',
       avatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 100000000)}?auto=format&fit=crop&w=256&h=256&q=80`,
-      weeklySchedule: {
-        1: [...newWindows],
-        2: [...newWindows],
-        3: [...newWindows],
-        4: [...newWindows],
-        5: [...newWindows],
-        0: [],
-        6: []
-      },
+      weeklySchedule: memberSchedule,
       maxInterviewsPerDay: 3
     });
 
@@ -247,8 +170,7 @@ export const PanelManagementView: React.FC = () => {
     setNewEmail('');
     setNewRole('');
     setNewWindows([
-      { start: '09:00', end: '13:00' },
-      { start: '14:00', end: '17:00' }
+      { start: '10:00', end: '13:00' }
     ]);
   };
 
@@ -322,9 +244,10 @@ export const PanelManagementView: React.FC = () => {
         }}
       >
         {filteredMembers.map((member) => {
-          const isOOOOnSelectedDate = member.dateOverrides?.[selectedDate] === false;
-          const hoursSummary = getMemberHoursSummary(member, selectedDate);
+          const hoursInfo = getMemberHoursForDate(member, selectedDate);
+          const isOOOOnSelectedDate = hoursInfo.isOOO;
           const overrideCount = member.dateOverrides ? Object.keys(member.dateOverrides).length : 0;
+          const isWeeklyExpanded = expandedWeeklyId === member.id;
 
           return (
             <div
@@ -404,7 +327,7 @@ export const PanelManagementView: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Availability stats & Working Hours */}
+                {/* Availability stats & Working Hours for Selected Date */}
                 <div
                   style={{
                     display: 'flex',
@@ -415,18 +338,71 @@ export const PanelManagementView: React.FC = () => {
                     background: 'var(--bg-subtle)',
                     padding: '0.55rem 0.75rem',
                     borderRadius: 'var(--radius-md)',
-                    marginBottom: '0.85rem',
+                    marginBottom: '0.55rem',
                     gap: '0.5rem'
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.35rem', flex: 1 }}>
                     <Clock size={13} color="var(--primary)" style={{ marginTop: '2px', flexShrink: 0 }} />
-                    <span style={{ fontWeight: 600, lineHeight: 1.35 }}>{hoursSummary}</span>
+                    <span style={{ fontWeight: 600, lineHeight: 1.35, color: hoursInfo.isAvailable ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                      {hoursInfo.summary}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
                     <Award size={13} color="#d97706" />
                     <span>{member.totalInterviewsConducted} conducted</span>
                   </div>
+                </div>
+
+                {/* View Full Weekly Schedule Expandable */}
+                <div style={{ marginBottom: '0.65rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedWeeklyId(isWeeklyExpanded ? null : member.id)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary)',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      padding: 0
+                    }}
+                  >
+                    <span>{isWeeklyExpanded ? 'Hide Weekly Schedule' : 'View Full Weekly Schedule'}</span>
+                    {isWeeklyExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  </button>
+
+                  {isWeeklyExpanded && (
+                    <div
+                      style={{
+                        marginTop: '0.45rem',
+                        background: 'var(--bg-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '0.5rem 0.65rem',
+                        border: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.25rem',
+                        fontSize: '0.7rem'
+                      }}
+                    >
+                      {DAY_CONFIG.map(({ key, short }) => {
+                        const wins = member.weeklySchedule?.[key] || [];
+                        return (
+                          <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{short}:</span>
+                            <span style={{ color: wins.length > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                              {wins.length > 0 ? wins.map(w => `${w.start} - ${w.end}`).join(', ') : 'Off'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {overrideCount > 0 && (
@@ -454,9 +430,13 @@ export const PanelManagementView: React.FC = () => {
                     <span style={{ fontSize: '0.75rem', color: 'var(--color-danger)', fontWeight: 600 }}>
                       ● Out of Office
                     </span>
-                  ) : (
+                  ) : hoursInfo.isAvailable ? (
                     <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: 600 }}>
                       ● Available
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                      ● Day Off
                     </span>
                   )}
                 </div>
@@ -498,213 +478,17 @@ export const PanelManagementView: React.FC = () => {
         })}
       </div>
 
-      {/* Edit Hours / Time Modal */}
-      <Modal
+      {/* Comprehensive Panelist Availability & Schedule Modal */}
+      <PanelScheduleModal
         isOpen={!!editingMember}
+        member={editingMember}
+        selectedDate={selectedDate}
         onClose={() => setEditingMember(null)}
-        title="Change Working Hours & Windows"
-        subtitle={editingMember ? <span>Configure multiple availability windows (e.g. 10–2 and 5–6) for <strong>{editingMember.name}</strong>.</span> : undefined}
-        maxWidth="540px"
-      >
-        <form onSubmit={handleSaveHours}>
-          {editHoursError && (
-            <div
-              style={{
-                color: 'var(--color-danger)',
-                background: 'var(--color-danger-bg)',
-                padding: '0.65rem 0.85rem',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                border: '1px solid var(--color-danger-border)',
-                marginBottom: '1rem'
-              }}
-            >
-              {editHoursError}
-            </div>
-          )}
-          <div className="form-group" style={{ marginBottom: '1rem' }}>
-            <label className="form-label">Apply Hours To</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.35rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="scope"
-                  checked={editScope === 'date'}
-                  onChange={() => setEditScope('date')}
-                />
-                <span>Specific Date (Variable Hours for Selected Date)</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="scope"
-                  checked={editScope === 'all'}
-                  onChange={() => setEditScope('all')}
-                />
-                <span>All Standard Workdays (Monday – Friday)</span>
-              </label>
-            </div>
-          </div>
-
-          {editScope === 'date' && (
-            <div className="form-group" style={{ marginBottom: '1rem' }}>
-              <label className="form-label">Select Date *</label>
-              <input
-                type="date"
-                className="form-input"
-                value={targetDate}
-                onChange={(e) => handleDateChange(e.target.value)}
-                required
-              />
-            </div>
-          )}
-
-          {/* Multiple Availability Windows */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label className="form-label" style={{ margin: 0, fontWeight: 700 }}>
-                Availability Windows ({editWindows.length})
-              </label>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={addEditWindow}
-                style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-              >
-                <Plus size={13} />
-                Add Another Window
-              </button>
-            </div>
-
-            {editWindows.map((win, idx) => (
-              <div
-                key={idx}
-                style={{
-                  background: 'var(--bg-subtle)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '0.75rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)' }}>
-                    Window #{idx + 1}
-                  </span>
-                  {editWindows.length > 1 && (
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      onClick={() => removeEditWindow(idx)}
-                      title="Remove window"
-                      style={{ color: 'var(--color-danger)' }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div>
-                    <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
-                      Available From
-                    </label>
-                    <select
-                      className="form-select"
-                      value={win.start}
-                      onChange={(e) => updateEditWindow(idx, 'start', e.target.value)}
-                    >
-                      {quarterHourOptions.map((opt) => (
-                        <option key={`edit-start-${idx}-${opt.time}`} value={opt.time}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
-                      Available Until
-                    </label>
-                    <select
-                      className="form-select"
-                      value={win.end}
-                      onChange={(e) => updateEditWindow(idx, 'end', e.target.value)}
-                    >
-                      {quarterHourOptions.map((opt) => (
-                        <option key={`edit-end-${idx}-${opt.time}`} value={opt.time}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Show list of configured date overrides for this member */}
-          {editingMember && editingMember.dateOverrides && Object.keys(editingMember.dateOverrides).length > 0 && (
-            <div style={{ marginBottom: '1.25rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.85rem' }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
-                Configured Date Overrides ({Object.keys(editingMember.dateOverrides).length}):
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: '120px', overflowY: 'auto' }}>
-                {Object.entries(editingMember.dateOverrides).map(([dStr, val]) => (
-                  <div
-                    key={dStr}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '0.75rem',
-                      background: 'var(--bg-subtle)',
-                      padding: '0.35rem 0.65rem',
-                      borderRadius: 'var(--radius-xs)',
-                      border: '1px solid var(--border-subtle)'
-                    }}
-                  >
-                    <span>
-                      <strong>{dStr}</strong>: {val === false ? <span style={{ color: 'var(--color-danger)' }}>Out of Office</span> : val.map(w => `${w.start} – ${w.end}`).join(', ')}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      style={{ padding: '0.2rem' }}
-                      title="Reset this date back to standard hours"
-                      onClick={() => {
-                        const newOverrides = { ...editingMember.dateOverrides };
-                        delete newOverrides[dStr];
-                        const updated = { ...editingMember, dateOverrides: newOverrides };
-                        updatePanelMember(updated);
-                        setEditingMember(updated);
-                      }}
-                    >
-                      <X size={13} color="var(--color-danger)" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setEditingMember(null)}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Save Working Hours
-            </button>
-          </div>
-        </form>
-      </Modal>
+        onSave={(updatedMember) => {
+          updatePanelMember(updatedMember);
+          setEditingMember(null);
+        }}
+      />
 
       {/* Add / Join Panelist Modal */}
       <Modal
@@ -792,91 +576,129 @@ export const PanelManagementView: React.FC = () => {
             />
           </div>
 
-          {/* Multiple Windows in Add Modal */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label className="form-label" style={{ margin: 0, fontWeight: 700 }}>
-                Availability Windows ({newWindows.length})
+          {/* Schedule Presets in Add Modal */}
+          <div className="form-group" style={{ marginTop: '0.85rem' }}>
+            <label className="form-label">Weekly Schedule</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'var(--bg-subtle)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="addSchedule"
+                  checked={addScheduleType === 'preset-split'}
+                  onChange={() => setAddScheduleType('preset-split')}
+                />
+                <span>⚡ <strong>Mon–Wed (10–1), Thu (Off), Fri (10–11, 12:30–1:15, 3–6)</strong></span>
               </label>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={addNewWindow}
-                style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-              >
-                <Plus size={13} />
-                Add Another Window
-              </button>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="addSchedule"
+                  checked={addScheduleType === 'preset-standard'}
+                  onChange={() => setAddScheduleType('preset-standard')}
+                />
+                <span>Standard Mon–Fri (9:00 AM – 5:00 PM)</span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="addSchedule"
+                  checked={addScheduleType === 'custom'}
+                  onChange={() => setAddScheduleType('custom')}
+                />
+                <span>Custom Windows (Configure below)</span>
+              </label>
             </div>
-
-            {newWindows.map((win, idx) => (
-              <div
-                key={idx}
-                style={{
-                  background: 'var(--bg-subtle)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '0.75rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)' }}>
-                    Window #{idx + 1}
-                  </span>
-                  {newWindows.length > 1 && (
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      onClick={() => removeNewWindow(idx)}
-                      title="Remove window"
-                      style={{ color: 'var(--color-danger)' }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div>
-                    <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
-                      Available From
-                    </label>
-                    <select
-                      className="form-select"
-                      value={win.start}
-                      onChange={(e) => updateNewWindow(idx, 'start', e.target.value)}
-                    >
-                      {quarterHourOptions.map((opt) => (
-                        <option key={`new-start-${idx}-${opt.time}`} value={opt.time}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
-                      Available Until
-                    </label>
-                    <select
-                      className="form-select"
-                      value={win.end}
-                      onChange={(e) => updateNewWindow(idx, 'end', e.target.value)}
-                    >
-                      {quarterHourOptions.map((opt) => (
-                        <option key={`new-end-${idx}-${opt.time}`} value={opt.time}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            ))}
           </div>
+
+          {/* Multiple Windows in Add Modal if Custom */}
+          {addScheduleType === 'custom' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label className="form-label" style={{ margin: 0, fontWeight: 700 }}>
+                  Availability Windows ({newWindows.length})
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={addNewWindow}
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                >
+                  <Plus size={13} />
+                  Add Another Window
+                </button>
+              </div>
+
+              {newWindows.map((win, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    background: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.75rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)' }}>
+                      Window #{idx + 1}
+                    </span>
+                    {newWindows.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        onClick={() => removeNewWindow(idx)}
+                        title="Remove window"
+                        style={{ color: 'var(--color-danger)' }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+                        Available From
+                      </label>
+                      <select
+                        className="form-select"
+                        value={win.start}
+                        onChange={(e) => updateNewWindow(idx, 'start', e.target.value)}
+                      >
+                        {quarterHourOptions.map((opt) => (
+                          <option key={`new-start-${idx}-${opt.time}`} value={opt.time}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+                        Available Until
+                      </label>
+                      <select
+                        className="form-select"
+                        value={win.end}
+                        onChange={(e) => updateNewWindow(idx, 'end', e.target.value)}
+                      >
+                        {quarterHourOptions.map((opt) => (
+                          <option key={`new-end-${idx}-${opt.time}`} value={opt.time}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
             <button

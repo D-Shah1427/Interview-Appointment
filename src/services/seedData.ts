@@ -86,7 +86,19 @@ export const INITIAL_PANEL_MEMBERS: PanelMember[] = [
     skills: ['Architecture', 'System Design', 'Leadership', 'Full-Stack'],
     seniority: 'Lead',
     avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=256&h=256&q=80',
-    weeklySchedule: standardSchedule('09:00', '12:00', '14:00', '18:00'),
+    weeklySchedule: {
+      1: [{ start: '10:00', end: '13:00' }], // Mon: 10:00 - 13:00
+      2: [{ start: '10:00', end: '13:00' }], // Tue: 10:00 - 13:00
+      3: [{ start: '10:00', end: '13:00' }], // Wed: 10:00 - 13:00
+      4: [],                                  // Thu: Not available / Off
+      5: [                                    // Fri: 10-11, 12:30-13:15, 15:00-18:00
+        { start: '10:00', end: '11:00' },
+        { start: '12:30', end: '13:15' },
+        { start: '15:00', end: '18:00' }
+      ],
+      6: [],
+      0: []
+    },
     maxInterviewsPerDay: 2,
     totalInterviewsConducted: 2
   },

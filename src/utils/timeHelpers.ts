@@ -70,3 +70,90 @@ export function formatInterviewSlotRange(startTime: string, durationMinutes = 30
   return `${startHour12}${startMStr} ${startAmPm} – ${endHour12}${endMStr} ${endAmPm}`;
 }
 
+export const DAY_CONFIG = [
+  { key: 1, name: 'Monday', short: 'Mon' },
+  { key: 2, name: 'Tuesday', short: 'Tue' },
+  { key: 3, name: 'Wednesday', short: 'Wed' },
+  { key: 4, name: 'Thursday', short: 'Thu' },
+  { key: 5, name: 'Friday', short: 'Fri' },
+  { key: 6, name: 'Saturday', short: 'Sat' },
+  { key: 0, name: 'Sunday', short: 'Sun' }
+] as const;
+
+export interface DateHoursSummary {
+  isAvailable: boolean;
+  isOOO: boolean;
+  isOverride: boolean;
+  summary: string;
+  windows: Array<{ start: string; end: string }>;
+}
+
+/**
+ * Accurately determines a panelist's hours for a specific calendar date (YYYY-MM-DD),
+ * respecting date overrides and day-of-week schedules.
+ */
+export function getMemberHoursForDate(
+  member: {
+    weeklySchedule: Record<number, Array<{ start: string; end: string }>>;
+    dateOverrides?: Record<string, Array<{ start: string; end: string }> | false>;
+  },
+  dateStr: string
+): DateHoursSummary {
+  // 1. Check specific date overrides (holiday, OOO, custom hours for date)
+  if (member.dateOverrides && member.dateOverrides[dateStr] !== undefined) {
+    const override = member.dateOverrides[dateStr];
+    if (override === false) {
+      return {
+        isAvailable: false,
+        isOOO: true,
+        isOverride: true,
+        summary: 'Out of Office (Date Override)',
+        windows: []
+      };
+    }
+    if (Array.isArray(override) && override.length > 0) {
+      return {
+        isAvailable: true,
+        isOOO: false,
+        isOverride: true,
+        summary: `${override.map(w => `${w.start} - ${w.end}`).join(', ')} (${dateStr})`,
+        windows: override
+      };
+    }
+    return {
+      isAvailable: false,
+      isOOO: true,
+      isOverride: true,
+      summary: 'Unavailable on this date',
+      windows: []
+    };
+  }
+
+  // 2. Check weekly schedule based on day of the week
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const dateObj = new Date(year, month - 1, day);
+  const dayOfWeek = dateObj.getDay();
+  const dayConfig = DAY_CONFIG.find(d => d.key === dayOfWeek);
+  const dayName = dayConfig ? dayConfig.name : 'this day';
+
+  const windows = member.weeklySchedule?.[dayOfWeek] || [];
+  if (windows.length > 0) {
+    return {
+      isAvailable: true,
+      isOOO: false,
+      isOverride: false,
+      summary: windows.map(w => `${w.start} - ${w.end}`).join(', '),
+      windows
+    };
+  }
+
+  return {
+    isAvailable: false,
+    isOOO: false,
+    isOverride: false,
+    summary: `Not Available on ${dayName}s`,
+    windows: []
+  };
+}
+
+

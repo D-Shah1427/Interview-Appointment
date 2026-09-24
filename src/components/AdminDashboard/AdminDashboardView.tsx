@@ -4,9 +4,10 @@ import { emailService } from '../../services/emailService';
 import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff } from 'lucide-react';
 import { getCandidateShareableUrl } from '../../utils/router';
 import { Department, Seniority, TimeWindow, PanelMember, InterviewBooking } from '../../types';
-import { getQuarterHourOptions } from '../../utils/timeHelpers';
+import { getQuarterHourOptions, getMemberHoursForDate, DAY_CONFIG } from '../../utils/timeHelpers';
 import { Modal } from '../Common/Modal';
 import { useStaffAuth } from '../../context/StaffAuthContext';
+import { PanelScheduleModal } from '../PanelManagement/PanelScheduleModal';
 
 const quarterHourOptions = getQuarterHourOptions(7, 20);
 
@@ -32,20 +33,15 @@ export const AdminDashboardView: React.FC = () => {
   const [newSeniority, setNewSeniority] = useState<Seniority>('Senior');
   const [newSkills, setNewSkills] = useState('TypeScript, React, Architecture');
   const [newWindows, setNewWindows] = useState<TimeWindow[]>([
-    { start: '09:00', end: '13:00' },
-    { start: '14:00', end: '17:00' }
+    { start: '10:00', end: '13:00' }
   ]);
 
   // Edit Panelist Hours Modal State for Admin
   const [editingMember, setEditingMember] = useState<PanelMember | null>(null);
-  const [targetDate, setTargetDate] = useState(selectedDate);
-  const [editWindows, setEditWindows] = useState<TimeWindow[]>([]);
-  const [editScope, setEditScope] = useState<'date' | 'all'>('date');
 
   // Deletion & Confirmation Modal States (non-blocking for Google Sites iframe compatibility)
   const [memberToDelete, setMemberToDelete] = useState<PanelMember | null>(null);
   const [bookingToCancel, setBookingToCancel] = useState<InterviewBooking | null>(null);
-  const [editHoursError, setEditHoursError] = useState<string | null>(null);
   const [addPanelistError, setAddPanelistError] = useState<string | null>(null);
 
   const candidateUrl = getCandidateShareableUrl();
@@ -78,94 +74,6 @@ export const AdminDashboardView: React.FC = () => {
     setNewWindows(prev => prev.map((w, idx) => idx === index ? { ...w, [field]: value } : w));
   };
 
-  // Multiple Window Handlers for Edit
-  const openEditHours = (member: PanelMember) => {
-    setEditingMember(member);
-    setTargetDate(selectedDate);
-    setEditHoursError(null);
-
-    const dateOverride = member.dateOverrides?.[selectedDate];
-    if (Array.isArray(dateOverride) && dateOverride.length > 0) {
-      setEditWindows([...dateOverride]);
-      setEditScope('date');
-    } else {
-      const mondayWindows = member.weeklySchedule[1] || member.weeklySchedule[2] || [];
-      if (mondayWindows.length > 0) {
-        setEditWindows([...mondayWindows]);
-      } else {
-        setEditWindows([{ start: '09:00', end: '17:00' }]);
-      }
-      setEditScope('date');
-    }
-  };
-
-  const addEditWindow = () => {
-    const lastWin = editWindows[editWindows.length - 1];
-    let defaultStart = '14:00';
-    let defaultEnd = '18:00';
-    if (lastWin) {
-      defaultStart = lastWin.end;
-      const [h] = defaultStart.split(':').map(Number);
-      const nextH = Math.min(20, h + 2);
-      defaultEnd = `${String(nextH).padStart(2, '0')}:00`;
-    }
-    setEditWindows(prev => [...prev, { start: defaultStart, end: defaultEnd }]);
-  };
-
-  const removeEditWindow = (index: number) => {
-    if (editWindows.length <= 1) return;
-    setEditWindows(prev => prev.filter((_, idx) => idx !== index));
-  };
-
-  const updateEditWindow = (index: number, field: 'start' | 'end', value: string) => {
-    setEditWindows(prev => prev.map((w, idx) => idx === index ? { ...w, [field]: value } : w));
-  };
-
-  const handleSaveHours = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingMember) return;
-
-    if (editWindows.length === 0) {
-      setEditHoursError('Please configure at least one availability window.');
-      return;
-    }
-
-    for (let i = 0; i < editWindows.length; i++) {
-      const w = editWindows[i];
-      if (w.start >= w.end) {
-        setEditHoursError(`Window #${i + 1} (${w.start} to ${w.end}) is invalid. Start time must be before end time.`);
-        return;
-      }
-    }
-
-    setEditHoursError(null);
-
-    if (editScope === 'date') {
-      const updatedOverrides = {
-        ...(editingMember.dateOverrides || {}),
-        [targetDate]: [...editWindows]
-      };
-      updatePanelMember({
-        ...editingMember,
-        dateOverrides: updatedOverrides as any
-      });
-    } else {
-      const newWeekly: Record<number, TimeWindow[]> = {
-        ...editingMember.weeklySchedule,
-        1: [...editWindows],
-        2: [...editWindows],
-        3: [...editWindows],
-        4: [...editWindows],
-        5: [...editWindows]
-      };
-      updatePanelMember({
-        ...editingMember,
-        weeklySchedule: newWeekly
-      });
-    }
-
-    setEditingMember(null);
-  };
 
   const handleAddPanelist = (e: React.FormEvent) => {
     e.preventDefault();
@@ -569,10 +477,7 @@ export const AdminDashboardView: React.FC = () => {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 {panelMembers.map((member) => {
-                  const monWindows = member.weeklySchedule[1] || [];
-                  const hoursLabel = monWindows.length > 0
-                    ? monWindows.map(w => `${w.start} - ${w.end}`).join(', ')
-                    : 'Flexible';
+                  const hoursInfo = getMemberHoursForDate(member, selectedDate);
                   const overrideCount = member.dateOverrides ? Object.keys(member.dateOverrides).length : 0;
 
                   return (
@@ -638,7 +543,7 @@ export const AdminDashboardView: React.FC = () => {
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.35rem', fontSize: '0.72rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
                             <Clock size={12} color="var(--primary)" />
-                            <span>Hours: <strong>{hoursLabel}</strong> (Mon-Fri)</span>
+                            <span>Hours: <strong style={{ color: hoursInfo.isAvailable ? 'var(--text-primary)' : 'var(--text-muted)' }}>{hoursInfo.summary}</strong></span>
                             <span style={{ color: 'var(--text-muted)' }}>•</span>
                             <span>Max <strong>{member.maxInterviewsPerDay || 3}</strong>/day</span>
                             <span style={{ color: 'var(--text-muted)' }}>•</span>
@@ -657,12 +562,12 @@ export const AdminDashboardView: React.FC = () => {
                         <button
                           type="button"
                           className="btn btn-secondary"
-                          onClick={() => openEditHours(member)}
+                          onClick={() => setEditingMember(member)}
                           style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
                           title="Change hours or set date overrides"
                         >
                           <Edit3 size={13} />
-                          Change Time
+                          Edit Hours
                         </button>
 
                         <button
@@ -1012,232 +917,17 @@ export const AdminDashboardView: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Admin Edit Working Hours Modal */}
-      <Modal
+      {/* Comprehensive Panelist Availability & Schedule Modal */}
+      <PanelScheduleModal
         isOpen={Boolean(editingMember)}
+        member={editingMember}
+        selectedDate={selectedDate}
         onClose={() => setEditingMember(null)}
-        title={
-          editingMember && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Clock size={18} color="var(--primary)" />
-              <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                Change Hours for {editingMember.name}
-              </span>
-            </div>
-          )
-        }
-        maxWidth="540px"
-      >
-        {editingMember && (
-          <form onSubmit={handleSaveHours} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {editHoursError && (
-              <div
-                style={{
-                  color: 'var(--color-danger)',
-                  background: 'var(--color-danger-bg)',
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  border: '1px solid var(--color-danger-border)'
-                }}
-              >
-                {editHoursError}
-              </div>
-            )}
-            <div>
-              <label className="input-label">Apply Hours To</label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.35rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="admin-edit-scope"
-                    checked={editScope === 'date'}
-                    onChange={() => setEditScope('date')}
-                  />
-                  <span>Specific Date (Variable Hours for Selected Date)</span>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="admin-edit-scope"
-                    checked={editScope === 'all'}
-                    onChange={() => setEditScope('all')}
-                  />
-                  <span>All Standard Workdays (Monday – Friday)</span>
-                </label>
-              </div>
-            </div>
-
-            {editScope === 'date' && (
-              <div>
-                <label className="input-label">Select Date *</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={targetDate}
-                  onChange={(e) => {
-                    const newD = e.target.value;
-                    setTargetDate(newD);
-                    const override = editingMember.dateOverrides?.[newD];
-                    if (Array.isArray(override) && override.length > 0) {
-                      setEditWindows([...override]);
-                    } else {
-                      const mondayWindows = editingMember.weeklySchedule[1] || [];
-                      if (mondayWindows.length > 0) setEditWindows([...mondayWindows]);
-                    }
-                  }}
-                  required
-                />
-              </div>
-            )}
-
-            {/* Multiple Windows in Edit Modal */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <label className="input-label" style={{ margin: 0, fontWeight: 700 }}>
-                  Availability Windows ({editWindows.length})
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={addEditWindow}
-                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                >
-                  <Plus size={13} />
-                  Add Another Window
-                </button>
-              </div>
-
-              {editWindows.map((win, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    background: 'var(--bg-subtle)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '0.75rem',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.5rem'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)' }}>
-                      Window #{idx + 1}
-                    </span>
-                    {editWindows.length > 1 && (
-                      <button
-                        type="button"
-                        className="btn-icon"
-                        onClick={() => removeEditWindow(idx)}
-                        title="Remove window"
-                        style={{ color: 'var(--color-danger)' }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
-                        Available From
-                      </label>
-                      <select
-                        className="input-field"
-                        value={win.start}
-                        onChange={(e) => updateEditWindow(idx, 'start', e.target.value)}
-                      >
-                        {quarterHourOptions.map((opt) => (
-                          <option key={`admin-edit-start-${idx}-${opt.time}`} value={opt.time}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
-                        Available Until
-                      </label>
-                      <select
-                        className="input-field"
-                        value={win.end}
-                        onChange={(e) => updateEditWindow(idx, 'end', e.target.value)}
-                      >
-                        {quarterHourOptions.map((opt) => (
-                          <option key={`admin-edit-end-${idx}-${opt.time}`} value={opt.time}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Show list of configured date overrides for this member */}
-            {editingMember.dateOverrides && Object.keys(editingMember.dateOverrides).length > 0 && (
-              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '0.75rem' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
-                  Configured Date Overrides ({Object.keys(editingMember.dateOverrides).length}):
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: '110px', overflowY: 'auto' }}>
-                  {Object.entries(editingMember.dateOverrides).map(([dStr, val]) => (
-                    <div
-                      key={dStr}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        fontSize: '0.75rem',
-                        background: 'var(--bg-subtle)',
-                        padding: '0.35rem 0.65rem',
-                        borderRadius: 'var(--radius-xs)',
-                        border: '1px solid var(--border-subtle)'
-                      }}
-                    >
-                      <span>
-                        <strong>{dStr}</strong>: {val === false ? <span style={{ color: 'var(--color-danger)' }}>Out of Office</span> : val.map(w => `${w.start} – ${w.end}`).join(', ')}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn-icon"
-                        style={{ padding: '0.2rem' }}
-                        title="Reset this date back to standard hours"
-                        onClick={() => {
-                          const newOverrides = { ...editingMember.dateOverrides };
-                          delete newOverrides[dStr];
-                          const updated = { ...editingMember, dateOverrides: newOverrides };
-                          updatePanelMember(updated);
-                          setEditingMember(updated);
-                        }}
-                      >
-                        <X size={13} color="var(--color-danger)" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setEditingMember(null)}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary">
-                Save Working Hours
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
+        onSave={(updatedMember) => {
+          updatePanelMember(updatedMember);
+          setEditingMember(null);
+        }}
+      />
 
       {/* Staff Passcode & Security Settings Modal */}
       <Modal
