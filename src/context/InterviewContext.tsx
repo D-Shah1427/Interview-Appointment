@@ -63,16 +63,30 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const remote = await cloudSyncService.pullFromCloud();
       if (remote) {
+        let changed = false;
         if (Array.isArray(remote.panelMembers)) {
           storageService.savePanelMembers(remote.panelMembers);
+          changed = true;
         }
         if (Array.isArray(remote.bookings)) {
           safeSetItem('interview_bookings_v1', JSON.stringify(remote.bookings));
+          changed = true;
         }
-        if (remote.passcode) {
+        if (remote.passcode && typeof remote.passcode === 'string' && remote.passcode.length >= 4) {
           safeSetItem('staff_portal_passcode', remote.passcode);
+          changed = true;
         }
-        reloadFromStorage();
+
+        if (changed) {
+          reloadFromStorage();
+        } else {
+          // Initial seed: remote sheet is empty or newly connected, populate it from local state
+          await cloudSyncService.pushToCloud({
+            panelMembers: storageService.getPanelMembers(),
+            bookings: storageService.getBookings(),
+            passcode: safeGetItem('staff_portal_passcode') || undefined
+          });
+        }
       }
       return true;
     } catch {
@@ -80,10 +94,23 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [reloadFromStorage]);
 
-  // Initial cloud sync pull on mount
+  // Initial cloud sync pull on mount, plus periodic background poll and focus sync
   useEffect(() => {
     if (cloudSyncService.isConfigured()) {
       triggerCloudSync();
+      const interval = setInterval(() => {
+        triggerCloudSync();
+      }, 30000);
+
+      const onFocus = () => {
+        triggerCloudSync();
+      };
+      window.addEventListener('focus', onFocus);
+
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('focus', onFocus);
+      };
     }
   }, [triggerCloudSync]);
 

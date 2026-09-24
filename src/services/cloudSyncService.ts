@@ -3,6 +3,7 @@ import type { PanelMember, InterviewBooking } from '../types';
 
 const CLOUD_SYNC_URL_KEY = 'interview_cloud_sync_url_v1';
 const CLOUD_LAST_SYNC_KEY = 'interview_cloud_last_sync_v1';
+export const DEFAULT_CLOUD_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwALGqQEcM01j2WT4hZESWGNWUlH_gnuA9KaDXPSUel-mzNMKkSjxD7xLde2Ec542tKJQ/exec';
 
 export interface CloudPayload {
   passcode?: string;
@@ -16,11 +17,11 @@ class CloudSyncService {
   private isSyncing = false;
 
   constructor() {
-    this.syncUrl = safeGetItem(CLOUD_SYNC_URL_KEY);
+    this.syncUrl = safeGetItem(CLOUD_SYNC_URL_KEY) || DEFAULT_CLOUD_SYNC_URL;
   }
 
   public getSyncUrl(): string | null {
-    return this.syncUrl || safeGetItem(CLOUD_SYNC_URL_KEY);
+    return this.syncUrl || safeGetItem(CLOUD_SYNC_URL_KEY) || DEFAULT_CLOUD_SYNC_URL;
   }
 
   public setSyncUrl(url: string | null): void {
