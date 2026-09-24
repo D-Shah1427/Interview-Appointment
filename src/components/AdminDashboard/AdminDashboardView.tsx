@@ -1372,20 +1372,40 @@ export const AdminDashboardView: React.FC = () => {
                   }}
                 >
 {`function doGet(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
-  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
   var val = sheet.getRange("A1").getValue();
   return ContentService.createTextOutput(val || "{}")
     .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
-  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
-  var data = e.postData.contents;
-  sheet.getRange("A1").setValue(data);
-  return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
-    .setMimeType(ContentService.MimeType.JSON);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dataSheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
+    var raw = e.postData.contents;
+    dataSheet.getRange("A1").setValue(raw);
+
+    // Populate a readable "Bookings" spreadsheet tab for HR / Team
+    var parsed = JSON.parse(raw);
+    if (parsed.bookings && Array.isArray(parsed.bookings)) {
+      var bSheet = ss.getSheetByName("Bookings") || ss.insertSheet("Bookings");
+      bSheet.clear();
+      bSheet.appendRow(["Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone", "Assigned Panel", "Status", "Booked At"]);
+      var header = bSheet.getRange(1, 1, 1, 9);
+      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
+      parsed.bookings.forEach(function(b) {
+        var panel = (b.assignedPanel || []).map(function(p) { return p.name; }).join(", ");
+        bSheet.appendRow([b.id, b.date, b.time, b.candidateName, b.candidateEmail, b.candidatePhone || "", panel, b.status, b.bookedAt]);
+      });
+      bSheet.autoResizeColumns(1, 9);
+    }
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }`}
                 </pre>
                 <button
@@ -1393,20 +1413,39 @@ function doPost(e) {
                   className="btn btn-secondary"
                   onClick={() => {
                     navigator.clipboard.writeText(`function doGet(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
-  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
   var val = sheet.getRange("A1").getValue();
   return ContentService.createTextOutput(val || "{}")
     .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Data");
-  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Data");
-  var data = e.postData.contents;
-  sheet.getRange("A1").setValue(data);
-  return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
-    .setMimeType(ContentService.MimeType.JSON);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dataSheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
+    var raw = e.postData.contents;
+    dataSheet.getRange("A1").setValue(raw);
+
+    var parsed = JSON.parse(raw);
+    if (parsed.bookings && Array.isArray(parsed.bookings)) {
+      var bSheet = ss.getSheetByName("Bookings") || ss.insertSheet("Bookings");
+      bSheet.clear();
+      bSheet.appendRow(["Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone", "Assigned Panel", "Status", "Booked At"]);
+      var header = bSheet.getRange(1, 1, 1, 9);
+      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
+      parsed.bookings.forEach(function(b) {
+        var panel = (b.assignedPanel || []).map(function(p) { return p.name; }).join(", ");
+        bSheet.appendRow([b.id, b.date, b.time, b.candidateName, b.candidateEmail, b.candidatePhone || "", panel, b.status, b.bookedAt]);
+      });
+      bSheet.autoResizeColumns(1, 9);
+    }
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }`);
                     setCopiedGasScript(true);
                     setTimeout(() => setCopiedGasScript(false), 2000);
