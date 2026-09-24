@@ -1,6 +1,7 @@
 import React from 'react';
-import { Calendar, Users, BarChart3, ExternalLink, ShieldCheck, ArrowLeft } from 'lucide-react';
+import { Calendar, Users, BarChart3, Lock, ArrowLeft } from 'lucide-react';
 import type { AppRoute } from '../utils/router';
+import { useStaffAuth } from '../context/StaffAuthContext';
 
 interface HeaderProps {
   currentView: AppRoute;
@@ -9,6 +10,12 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
   const isCandidateView = currentView === 'candidate';
+  const { isAuthenticated, logout } = useStaffAuth();
+
+  const handleLockPortal = () => {
+    logout();
+    onNavigate('candidate');
+  };
 
   return (
     <header className="app-header">
@@ -19,19 +26,9 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
         <h1 className="brand-title">Interview Appointment</h1>
       </div>
 
-      {/* Navigation tabs - visible in Staff mode */}
-      {!isCandidateView ? (
+      {/* Navigation tabs - visible ONLY in Staff mode when authenticated */}
+      {!isCandidateView && isAuthenticated ? (
         <nav className="nav-tabs">
-          <button
-            type="button"
-            className="nav-tab-btn"
-            onClick={() => onNavigate('candidate')}
-            title="Preview candidate booking portal"
-          >
-            <ArrowLeft size={14} />
-            Candidate View
-          </button>
-
           <button
             type="button"
             className={`nav-tab-btn ${currentView === 'panelists' ? 'active' : ''}`}
@@ -58,30 +55,40 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
           <span>Live Sync</span>
         </div>
 
-        {/* Quick switcher in header */}
-        {isCandidateView ? (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => onNavigate('admin')}
-            style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem', gap: '0.35rem' }}
-            title="Switch to Recruiter Dashboard and Panel Management"
-          >
-            <ShieldCheck size={14} color="var(--primary)" />
-            Staff Portal
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => onNavigate('candidate')}
-            style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem' }}
-            title="Switch back to candidate booking view"
-          >
-            Candidate View
-          </button>
+        {/* Staff view action controls: Candidate View preview and Lock Portal */}
+        {!isCandidateView && isAuthenticated && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => onNavigate('candidate')}
+              style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem', gap: '0.35rem' }}
+              title="Preview candidate booking portal"
+            >
+              <ArrowLeft size={14} />
+              Candidate View
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleLockPortal}
+              style={{
+                fontSize: '0.78rem',
+                padding: '0.4rem 0.75rem',
+                gap: '0.35rem',
+                color: 'var(--color-danger)',
+                borderColor: 'var(--color-danger-border)'
+              }}
+              title="Lock staff portal and sign out"
+            >
+              <Lock size={14} />
+              Lock
+            </button>
+          </div>
         )}
       </div>
     </header>
   );
 };
+

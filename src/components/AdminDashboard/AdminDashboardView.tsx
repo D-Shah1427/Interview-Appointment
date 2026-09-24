@@ -1,18 +1,27 @@
 import React, { useState } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import { emailService } from '../../services/emailService';
-import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus } from 'lucide-react';
+import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff } from 'lucide-react';
 import { getCandidateShareableUrl } from '../../utils/router';
 import { Department, Seniority, TimeWindow, PanelMember } from '../../types';
 import { getQuarterHourOptions } from '../../utils/timeHelpers';
 import { Modal } from '../Common/Modal';
+import { useStaffAuth } from '../../context/StaffAuthContext';
 
 const quarterHourOptions = getQuarterHourOptions(7, 20);
 
 export const AdminDashboardView: React.FC = () => {
   const { bookings, panelMembers, auditLogs, cancelInterview, addPanelMember, deletePanelMember, updatePanelMember, selectedDate } = useInterview();
+  const { currentPasscode, updatePasscode } = useStaffAuth();
   const [activeTab, setActiveTab] = useState<'bookings' | 'panelists' | 'emails'>('bookings');
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Security Passcode Modal State
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [currPinInput, setCurrPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [showCurrentPin, setShowCurrentPin] = useState(false);
+  const [securityStatus, setSecurityStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Add Panelist Modal State for Admin
   const [showAddModal, setShowAddModal] = useState(false);
@@ -338,7 +347,7 @@ export const AdminDashboardView: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn btn-secondary"
@@ -359,6 +368,22 @@ export const AdminDashboardView: React.FC = () => {
             <ExternalLink size={14} />
             Open Portal
           </a>
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              setSecurityStatus(null);
+              setCurrPinInput('');
+              setNewPinInput('');
+              setShowSecurityModal(true);
+            }}
+            style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem', gap: '0.35rem' }}
+            title="Manage staff access passcode and security"
+          >
+            <KeyRound size={14} color="var(--primary)" />
+            Staff Passcode
+          </button>
         </div>
       </div>
 
@@ -1179,6 +1204,124 @@ export const AdminDashboardView: React.FC = () => {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* Staff Passcode & Security Settings Modal */}
+      <Modal
+        isOpen={showSecurityModal}
+        onClose={() => setShowSecurityModal(false)}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <KeyRound size={18} color="var(--primary)" />
+            <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              Staff Access & Passcode Settings
+            </span>
+          </div>
+        }
+        subtitle="Configure the security passcode required to access Admin and Panelist management."
+        maxWidth="500px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Current Passcode Preview */}
+          <div
+            style={{
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              padding: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                Active Staff Passcode
+              </div>
+              <div style={{ fontSize: '1.1rem', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginTop: '0.15rem' }}>
+                {showCurrentPin ? currentPasscode : '••••••••'}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowCurrentPin(!showCurrentPin)}
+              style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', gap: '0.25rem' }}
+            >
+              {showCurrentPin ? <EyeOff size={14} /> : <Eye size={14} />}
+              {showCurrentPin ? 'Hide' : 'Reveal'}
+            </button>
+          </div>
+
+          {securityStatus && (
+            <div
+              style={{
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                background: securityStatus.type === 'success' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                color: securityStatus.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)',
+                border: `1px solid ${securityStatus.type === 'success' ? 'var(--color-success-border)' : 'var(--color-danger-border)'}`
+              }}
+            >
+              {securityStatus.message}
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const res = updatePasscode(currPinInput, newPinInput);
+              if (res.success) {
+                setSecurityStatus({ type: 'success', message: res.message });
+                setCurrPinInput('');
+                setNewPinInput('');
+              } else {
+                setSecurityStatus({ type: 'error', message: res.message });
+              }
+            }}
+            style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+          >
+            <div>
+              <label className="form-label">Current Passcode *</label>
+              <input
+                type="password"
+                className="form-input"
+                required
+                placeholder="Enter current passcode..."
+                value={currPinInput}
+                onChange={(e) => setCurrPinInput(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="form-label">New Passcode (min 4 characters) *</label>
+              <input
+                type="password"
+                className="form-input"
+                required
+                placeholder="Enter new passcode..."
+                value={newPinInput}
+                onChange={(e) => setNewPinInput(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowSecurityModal(false)}
+              >
+                Done
+              </button>
+              <button type="submit" className="btn btn-primary">
+                Update Passcode
+              </button>
+            </div>
+          </form>
+        </div>
       </Modal>
     </div>
   );
