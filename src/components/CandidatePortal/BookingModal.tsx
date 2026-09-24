@@ -76,7 +76,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--text-primary)', fontWeight: 600 }}>
           <Clock size={16} color="var(--primary)" />
-          <span>{formatInterviewSlotRange(slotTime)} (30 mins)</span>
+          <span>{formatInterviewSlotRange(slotTime)}</span>
         </div>
       </div>
 

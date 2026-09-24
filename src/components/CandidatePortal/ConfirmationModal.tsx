@@ -6,6 +6,7 @@ import { generateGoogleCalendarUrl } from '../../utils/meetingGenerator';
 import { emailService, SentEmailNotification } from '../../services/emailService';
 import { CheckCircle2, Calendar, Clock, Mail, Download, ShieldCheck, ChevronDown, ChevronUp } from 'lucide-react';
 import { Modal } from '../Common/Modal';
+import { formatInterviewSlotRange } from '../../utils/timeHelpers';
 
 interface ConfirmationModalProps {
   booking: InterviewBooking;
@@ -95,10 +96,10 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ booking, o
             <Clock size={16} color="var(--primary)" />
             <div>
               <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-                Time & Duration
+                Time
               </div>
               <div style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
-                {booking.time} ({booking.durationMinutes} mins)
+                {formatInterviewSlotRange(booking.time, booking.durationMinutes || 30)}
               </div>
             </div>
           </div>

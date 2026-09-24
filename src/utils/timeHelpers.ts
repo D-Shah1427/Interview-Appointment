@@ -1,6 +1,6 @@
 export interface TimeOption {
   time: string; // "09:15"
-  label: string; // "9:15 AM – Quarter past 9"
+  label: string; // "9:15 AM"
   period: 'Morning' | 'Afternoon' | 'Late Afternoon';
   minuteType: 'hour' | 'quarter-past' | 'half-past' | 'quarter-to';
 }
@@ -18,20 +18,14 @@ export function getQuarterHourOptions(startHour = 8, endHour = 19): TimeOption[]
       const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
       const hour12 = h % 12 || 12;
       const amPm = h >= 12 ? 'PM' : 'AM';
-      const nextHour12 = (h + 1) % 12 || 12;
 
       let minuteType: TimeOption['minuteType'] = 'hour';
-      let modifier = 'On the hour';
-
       if (m === 15) {
         minuteType = 'quarter-past';
-        modifier = `Quarter past ${hour12}`;
       } else if (m === 30) {
         minuteType = 'half-past';
-        modifier = `Half past ${hour12}`;
       } else if (m === 45) {
         minuteType = 'quarter-to';
-        modifier = `Quarter to ${nextHour12}`;
       }
 
       let period: TimeOption['period'] = 'Morning';
@@ -42,7 +36,7 @@ export function getQuarterHourOptions(startHour = 8, endHour = 19): TimeOption[]
       }
 
       const mStr = `:${String(m).padStart(2, '0')}`;
-      const label = `${hour12}${mStr} ${amPm} (${modifier})`;
+      const label = `${hour12}${mStr} ${amPm}`;
 
       options.push({
         time,
@@ -76,14 +70,3 @@ export function formatInterviewSlotRange(startTime: string, durationMinutes = 30
   return `${startHour12}${startMStr} ${startAmPm} – ${endHour12}${endMStr} ${endAmPm}`;
 }
 
-/**
- * Return friendly timing label tag:
- * e.g. "Quarter past" (:15), "Half past" (:30), "Quarter to" (:45), "On the hour" (:00)
- */
-export function getTimingBadge(time: string): { label: string; type: 'hour' | 'quarter-past' | 'half-past' | 'quarter-to' } {
-  const [, m] = time.split(':').map(Number);
-  if (m === 15) return { label: 'Quarter past', type: 'quarter-past' };
-  if (m === 30) return { label: 'Half past', type: 'half-past' };
-  if (m === 45) return { label: 'Quarter to', type: 'quarter-to' };
-  return { label: 'On the hour', type: 'hour' };
-}
