@@ -54,7 +54,7 @@ class EmailService {
       recipientEmail: booking.candidateEmail,
       recipientName: booking.candidateName,
       subject: `Appointment Confirmed: Interview on ${booking.date} at ${booking.time}`,
-      bodyText: `Dear ${booking.candidateName},\n\nYour interview appointment has been successfully scheduled.\n\nDate: ${booking.date}\nTime: ${booking.time} (60 minutes)\n\nNote on Video Meeting Link:\nThe secure video meeting link will be sent directly to this email address (${booking.candidateEmail}) prior to your scheduled interview.\n\nPlease find your calendar invite attached or download it from your confirmation portal.\n\nBest regards,\nTalent Acquisition Team`,
+      bodyText: `Dear ${booking.candidateName},\n\nYour interview appointment has been successfully scheduled.\n\nDate: ${booking.date}\nTime: ${booking.time} (${booking.durationMinutes || 30} minutes)\n\nNote on Video Meeting Link:\nThe secure video meeting link will be sent directly to this email address (${booking.candidateEmail}) prior to your scheduled interview.\n\nPlease find your calendar invite attached or download it from your confirmation portal.\n\nBest regards,\nTalent Acquisition Team`,
       sentAt: now,
       status: 'delivered'
     };
@@ -72,7 +72,7 @@ class EmailService {
       recipientEmail: 'recruiting-team@company.internal',
       recipientName: 'Talent Acquisition & Admin',
       subject: `[Interview Scheduled] ${booking.candidateName} - ${booking.date} at ${booking.time} (${booking.assignedPanel.length} Panel Members Assigned)`,
-      bodyText: `A new candidate interview has been booked.\n\nCandidate Details:\n- Name: ${booking.candidateName}\n- Email: ${booking.candidateEmail}\n- Phone: ${booking.candidatePhone || 'Not provided'}\n- Notes: ${booking.notes || 'None'}\n\nInterview Schedule:\n- Date: ${booking.date}\n- Time: ${booking.time} (60 minutes)\n\nDynamically Selected Panel (${booking.assignedPanel.length} Members):\n${panelistListText}\n\nAction Required:\nVideo conference link will be sent externally to candidate and panel members before the session.`,
+      bodyText: `A new candidate interview has been booked.\n\nCandidate Details:\n- Name: ${booking.candidateName}\n- Email: ${booking.candidateEmail}\n- Phone: ${booking.candidatePhone || 'Not provided'}\n- Notes: ${booking.notes || 'None'}\n\nInterview Schedule:\n- Date: ${booking.date}\n- Time: ${booking.time} (${booking.durationMinutes || 30} minutes)\n\nDynamically Selected Panel (${booking.assignedPanel.length} Members):\n${panelistListText}\n\nAction Required:\nVideo conference link will be sent externally to candidate and panel members before the session.`,
       sentAt: now,
       status: 'delivered'
     };
@@ -87,7 +87,7 @@ class EmailService {
         recipientEmail: `${panelist.name.toLowerCase().replace(/\s+/g, '.')}@company.internal`,
         recipientName: panelist.name,
         subject: `Interview Panel Assignment: Candidate ${booking.candidateName} on ${booking.date} at ${booking.time}`,
-        bodyText: `Hello ${panelist.name},\n\nYou have been dynamically assigned to an interview panel based on your availability.\n\nCandidate: ${booking.candidateName}\nDate: ${booking.date}\nTime: ${booking.time} (60 minutes)\nYour Role on Panel: ${panelist.panelRole}\n\nFull Panel (${booking.assignedPanel.length} members):\n${panelistListText}\n\nThe video meeting link will be dispatched prior to the interview session.\n\nThank you,\nEngineering & Talent Operations`,
+        bodyText: `Hello ${panelist.name},\n\nYou have been dynamically assigned to an interview panel based on your availability.\n\nCandidate: ${booking.candidateName}\nDate: ${booking.date}\nTime: ${booking.time} (${booking.durationMinutes || 30} minutes)\nYour Role on Panel: ${panelist.panelRole}\n\nFull Panel (${booking.assignedPanel.length} members):\n${panelistListText}\n\nThe video meeting link will be dispatched prior to the interview session.\n\nThank you,\nEngineering & Talent Operations`,
         sentAt: now,
         status: 'delivered'
       };

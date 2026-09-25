@@ -20,22 +20,26 @@ export function isTimeInWindow(
   return slotStart >= windowStart && slotEnd <= windowEnd;
 }
 
+export const INTERVIEW_BUFFER_MINUTES = 15;
+
 /**
- * Determines if a panel member is available on a given date and time slot
+ * Determines if a panel member is available on a given date and time slot,
+ * ensuring no overlapping interviews and enforcing at least a 15-minute buffer between interviews.
  */
 export function isPanelistAvailableForSlot(
   panelist: PanelMember,
   dateStr: string,
   timeStr: string,
   bookings: InterviewBooking[],
-  slotDuration = 30
+  slotDuration = 30,
+  bufferMinutes = INTERVIEW_BUFFER_MINUTES
 ): boolean {
   const [sH, sM] = timeStr.split(':').map(Number);
   const slotStart = sH * 60 + sM;
   const slotEnd = slotStart + slotDuration;
 
-  // 1. Check if panelist is already booked for any interview overlapping with this slot
-  const overlapsExistingBooking = bookings.some(b => {
+  // 1. Check if panelist is already booked for any interview conflicting with this slot (including buffer)
+  const conflictsWithExistingBooking = bookings.some(b => {
     if (b.date !== dateStr || b.status !== 'confirmed') return false;
     const isAssigned = b.assignedPanel.some(p => p.memberId === panelist.id);
     if (!isAssigned) return false;
@@ -44,9 +48,10 @@ export function isPanelistAvailableForSlot(
     const bStart = bH * 60 + bM;
     const bEnd = bStart + (b.durationMinutes || 30);
 
-    return Math.max(slotStart, bStart) < Math.min(slotEnd, bEnd);
+    // Requires at least bufferMinutes gap between consecutive interviews
+    return slotStart < bEnd + bufferMinutes && bStart < slotEnd + bufferMinutes;
   });
-  if (overlapsExistingBooking) return false;
+  if (conflictsWithExistingBooking) return false;
 
   // 2. Check daily interview limit
   const interviewsToday = bookings.filter(
