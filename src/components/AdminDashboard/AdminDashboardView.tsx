@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import { emailService } from '../../services/emailService';
-import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff, Cloud, RefreshCw, Download, Upload } from 'lucide-react';
+import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff, Cloud, RefreshCw, Download, Upload, ArrowUpDown, Send, Filter } from 'lucide-react';
 import { getCandidateShareableUrl } from '../../utils/router';
 import { Department, Seniority, TimeWindow, PanelMember, InterviewBooking } from '../../types';
 import { getQuarterHourOptions, getMemberHoursForDate, DAY_CONFIG } from '../../utils/timeHelpers';
+import { sortBookingsByEarliestMeetTime, formatFriendlyMeetDate } from '../../utils/dateHelpers';
 import { Modal } from '../Common/Modal';
 import { useStaffAuth } from '../../context/StaffAuthContext';
 import { PanelScheduleModal } from '../PanelManagement/PanelScheduleModal';
@@ -19,6 +20,7 @@ export const AdminDashboardView: React.FC = () => {
     panelMembers,
     auditLogs,
     cancelInterview,
+    toggleEmailSent,
     addPanelMember,
     deletePanelMember,
     updatePanelMember,
@@ -223,7 +225,47 @@ export const AdminDashboardView: React.FC = () => {
     ]);
   };
 
-  const confirmedBookings = bookings.filter(b => b.status === 'confirmed');
+  // Scheduled Interviews Sorting & Email Dispatch Filter
+  const [bookingSortBy, setBookingSortBy] = useState<'earliest' | 'latest' | 'recently-booked' | 'name'>('earliest');
+  const [bookingEmailFilter, setBookingEmailFilter] = useState<'all' | 'pending' | 'sent'>('all');
+  const [bookingSearchQuery, setBookingSearchQuery] = useState('');
+
+  const confirmedBookings = useMemo(() => bookings.filter(b => b.status === 'confirmed'), [bookings]);
+  const pendingEmailCount = useMemo(() => confirmedBookings.filter(b => !b.emailSent).length, [confirmedBookings]);
+
+  // Bookings sorted and filtered according to user preferences (defaults to earliest meet time)
+  const displayedBookings = useMemo(() => {
+    let list = [...confirmedBookings];
+
+    if (bookingEmailFilter === 'pending') {
+      list = list.filter(b => !b.emailSent);
+    } else if (bookingEmailFilter === 'sent') {
+      list = list.filter(b => !!b.emailSent);
+    }
+
+    if (bookingSearchQuery.trim()) {
+      const q = bookingSearchQuery.toLowerCase().trim();
+      list = list.filter(b =>
+        (b.candidateName && b.candidateName.toLowerCase().includes(q)) ||
+        (b.candidateEmail && b.candidateEmail.toLowerCase().includes(q)) ||
+        (b.date && b.date.includes(q)) ||
+        (b.time && b.time.includes(q))
+      );
+    }
+
+    if (bookingSortBy === 'earliest') {
+      return sortBookingsByEarliestMeetTime(list, 'asc');
+    } else if (bookingSortBy === 'latest') {
+      return sortBookingsByEarliestMeetTime(list, 'desc');
+    } else if (bookingSortBy === 'recently-booked') {
+      return [...list].sort((a, b) => new Date(b.bookedAt || 0).getTime() - new Date(a.bookedAt || 0).getTime());
+    } else if (bookingSortBy === 'name') {
+      return [...list].sort((a, b) => (a.candidateName || '').localeCompare(b.candidateName || ''));
+    }
+
+    return sortBookingsByEarliestMeetTime(list, 'asc');
+  }, [confirmedBookings, bookingEmailFilter, bookingSearchQuery, bookingSortBy]);
+
   const allSentEmails = emailService.getAllSentEmails();
 
   return (
@@ -253,10 +295,16 @@ export const AdminDashboardView: React.FC = () => {
           <div style={{ fontSize: '2.2rem', fontWeight: 800, margin: '0.4rem 0 0.2rem', color: 'var(--text-primary)' }}>
             {confirmedBookings.length}
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600 }}>
-            <CheckCircle2 size={13} />
-            <span>Real-time confirmed</span>
-          </div>
+          {pendingEmailCount > 0 ? (
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-warning)', display: 'flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600 }}>
+              <span>⚠️ {pendingEmailCount} invite{pendingEmailCount > 1 ? 's' : ''} pending dispatch</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600 }}>
+              <CheckCircle2 size={13} />
+              <span>All email invites dispatched</span>
+            </div>
+          )}
         </div>
 
         <div
@@ -475,113 +523,312 @@ export const AdminDashboardView: React.FC = () => {
           </div>
 
           {activeTab === 'bookings' ? (
-            confirmedBookings.length === 0 ? (
+            <div>
+              {/* Search, Sort & Email Filter Toolbar */}
               <div
                 style={{
-                  textAlign: 'center',
-                  padding: '3rem 1rem',
-                  color: 'var(--text-muted)',
-                  fontSize: '0.9rem'
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                  marginBottom: '1.25rem',
+                  background: 'var(--bg-subtle)',
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)'
                 }}
               >
-                No interviews scheduled yet.
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {confirmedBookings.map((b) => (
-                  <div
-                    key={b.id}
-                    style={{
-                      background: 'var(--bg-subtle)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '1.1rem',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.75rem'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                      <div>
-                        <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{b.candidateName}</h4>
-                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{b.candidateEmail}</p>
-                      </div>
+                {/* Search */}
+                <div style={{ flex: '1 1 220px', minWidth: '180px' }}>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="Search candidate name, email, date..."
+                    value={bookingSearchQuery}
+                    onChange={(e) => setBookingSearchQuery(e.target.value)}
+                    style={{ padding: '0.42rem 0.75rem', fontSize: '0.82rem', width: '100%' }}
+                  />
+                </div>
 
-                      <div style={{ textAlign: 'right' }}>
-                        <div
-                          style={{
-                            fontSize: '0.88rem',
-                            fontWeight: 700,
-                            color: 'var(--primary)',
-                            fontFamily: 'var(--font-mono)'
-                          }}
-                        >
-                          {b.date} at {b.time}
-                        </div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          Video link sent via email
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Panel Avatars visible to Admin */}
-                    <div
-                      style={{
-                        background: 'var(--bg-surface)',
-                        padding: '0.75rem 1rem',
-                        borderRadius: 'var(--radius-sm)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        border: '1px solid var(--border-subtle)'
-                      }}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  {/* Sort Dropdown */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <ArrowUpDown size={14} color="var(--primary)" />
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Sort:</span>
+                    <select
+                      className="input-field"
+                      value={bookingSortBy}
+                      onChange={(e) => setBookingSortBy(e.target.value as any)}
+                      style={{ padding: '0.4rem 0.65rem', fontSize: '0.82rem' }}
                     >
-                      <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-                          Assigned Panel ({b.assignedPanel.length} members):
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.35rem' }}>
-                          {b.assignedPanel.map((p) => (
+                      <option value="earliest">Earliest Meet Time (Upcoming first)</option>
+                      <option value="latest">Latest Meet Time</option>
+                      <option value="recently-booked">Recently Booked</option>
+                      <option value="name">Candidate Name (A-Z)</option>
+                    </select>
+                  </div>
+
+                  {/* Email Status Filter */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Filter size={14} color="var(--primary)" />
+                    <select
+                      className="input-field"
+                      value={bookingEmailFilter}
+                      onChange={(e) => setBookingEmailFilter(e.target.value as any)}
+                      style={{ padding: '0.4rem 0.65rem', fontSize: '0.82rem' }}
+                    >
+                      <option value="all">All Email Statuses ({confirmedBookings.length})</option>
+                      <option value="pending">⚠️ Email Pending ({pendingEmailCount})</option>
+                      <option value="sent">✅ Email Sent ({confirmedBookings.length - pendingEmailCount})</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {confirmedBookings.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    padding: '3rem 1rem',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  No interviews scheduled yet.
+                </div>
+              ) : displayedBookings.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    padding: '2.5rem 1rem',
+                    background: 'var(--bg-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px dashed var(--border-subtle)'
+                  }}
+                >
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.75rem' }}>
+                    No interviews match your search or filter criteria.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setBookingSearchQuery('');
+                      setBookingEmailFilter('all');
+                      setBookingSortBy('earliest');
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {displayedBookings.map((b) => {
+                    const friendlyDate = formatFriendlyMeetDate(b.date);
+                    return (
+                      <div
+                        key={b.id}
+                        style={{
+                          background: 'var(--bg-subtle)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '1.15rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.85rem'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                                {b.candidateName}
+                              </h4>
+                              {friendlyDate.relativeBadge && (
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    padding: '0.15rem 0.45rem',
+                                    borderRadius: 'var(--radius-full)',
+                                    background: 'rgba(79, 70, 229, 0.1)',
+                                    color: 'var(--primary)',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  {friendlyDate.relativeBadge}
+                                </span>
+                              )}
+                            </div>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0' }}>
+                              {b.candidateEmail}
+                              {b.candidatePhone && ` • ${b.candidatePhone}`}
+                            </p>
+                            {b.notes && (
+                              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontStyle: 'italic', margin: '0.25rem 0 0' }}>
+                                Note: {b.notes}
+                              </p>
+                            )}
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
                             <div
-                              key={p.memberId}
                               style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.35rem',
-                                fontSize: '0.75rem',
-                                background: 'var(--bg-subtle)',
-                                padding: '0.25rem 0.5rem',
-                                borderRadius: 'var(--radius-sm)',
-                                border: '1px solid var(--border-subtle)'
+                                fontSize: '0.95rem',
+                                fontWeight: 700,
+                                color: 'var(--primary)',
+                                fontFamily: 'var(--font-mono)'
                               }}
                             >
-                              <img
-                                src={p.avatar}
-                                alt={p.name}
-                                style={{ width: '18px', height: '18px', borderRadius: '50%' }}
-                              />
-                              <span style={{ fontWeight: 600 }}>{p.name}</span>
-                              <span style={{ fontSize: '0.68rem', color: 'var(--primary)' }}>({p.panelRole.split(' ')[0]})</span>
+                              📅 {b.date} at {b.time}
                             </div>
-                          ))}
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                              30-min session • {b.stageTitle}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Manual Email Dispatch Status & Tick Action */}
+                        <div
+                          style={{
+                            background: b.emailSent ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                            border: `1px solid ${b.emailSent ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.65rem 0.85rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: '0.6rem'
+                          }}
+                        >
+                          <label
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.55rem',
+                              cursor: 'pointer',
+                              userSelect: 'none',
+                              fontSize: '0.82rem',
+                              fontWeight: 600,
+                              color: b.emailSent ? 'var(--color-success)' : 'var(--color-warning)'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!b.emailSent}
+                              onChange={() => toggleEmailSent(b.id)}
+                              style={{
+                                width: '17px',
+                                height: '17px',
+                                cursor: 'pointer',
+                                accentColor: 'var(--color-success)'
+                              }}
+                            />
+                            <span>
+                              {b.emailSent ? '✅ Email Invite Dispatched' : '⚠️ Email Invite Pending'}
+                            </span>
+                            {b.emailSent && b.emailSentAt && (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+                                (Ticked on {new Date(b.emailSentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at {new Date(b.emailSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                              </span>
+                            )}
+                            {!b.emailSent && (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+                                — Admin sends calendar / Meet link outside platform
+                              </span>
+                            )}
+                          </label>
+
+                          <button
+                            type="button"
+                            className={b.emailSent ? "btn btn-secondary" : "btn btn-primary"}
+                            onClick={() => toggleEmailSent(b.id)}
+                            style={{
+                              fontSize: '0.74rem',
+                              padding: '0.3rem 0.7rem',
+                              gap: '0.35rem',
+                              display: 'inline-flex',
+                              alignItems: 'center'
+                            }}
+                          >
+                            {b.emailSent ? (
+                              <>
+                                <Check size={13} color="var(--color-success)" />
+                                <span>Ticked (Sent)</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send size={13} />
+                                <span>Mark Email Sent</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Panel Avatars and Actions */}
+                        <div
+                          style={{
+                            background: 'var(--bg-surface)',
+                            padding: '0.75rem 1rem',
+                            borderRadius: 'var(--radius-sm)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            border: '1px solid var(--border-subtle)',
+                            flexWrap: 'wrap',
+                            gap: '0.75rem'
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                              Assigned Panel ({b.assignedPanel.length} members):
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.35rem' }}>
+                              {b.assignedPanel.map((p) => (
+                                <div
+                                  key={p.memberId}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    fontSize: '0.75rem',
+                                    background: 'var(--bg-subtle)',
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: 'var(--radius-sm)',
+                                    border: '1px solid var(--border-subtle)'
+                                  }}
+                                >
+                                  <img
+                                    src={p.avatar}
+                                    alt={p.name}
+                                    style={{ width: '18px', height: '18px', borderRadius: '50%' }}
+                                  />
+                                  <span style={{ fontWeight: 600 }}>{p.name}</span>
+                                  <span style={{ fontSize: '0.68rem', color: 'var(--primary)' }}>({p.panelRole.split(' ')[0]})</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger"
+                            onClick={() => setBookingToCancel(b)}
+                            style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                            title="Cancel interview and release slot back into pool"
+                          >
+                            <Trash2 size={13} />
+                            Release Slot
+                          </button>
                         </div>
                       </div>
-
-                      <button
-                        type="button"
-                        className="btn btn-outline-danger"
-                        onClick={() => setBookingToCancel(b)}
-                        style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                        title="Cancel interview and release slot back into pool"
-                      >
-                        <Trash2 size={13} />
-                        Release Slot
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           ) : activeTab === 'panelists' ? (
             panelMembers.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>

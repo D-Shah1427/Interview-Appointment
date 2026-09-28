@@ -24,6 +24,7 @@ interface InterviewContextType {
     time: string;
   }) => Promise<InterviewBooking>;
   cancelInterview: (bookingId: string) => void;
+  toggleEmailSent: (bookingId: string) => boolean;
   updatePanelMember: (member: PanelMember) => void;
   addPanelMember: (member: Omit<PanelMember, 'id' | 'totalInterviewsConducted'>) => void;
   deletePanelMember: (memberId: string) => void;
@@ -213,6 +214,18 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [reloadFromStorage]);
 
+  const toggleEmailSent = useCallback((bookingId: string): boolean => {
+    const res = storageService.toggleBookingEmailSent(bookingId);
+    reloadFromStorage();
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        bookings: storageService.getBookings(),
+        panelMembers: storageService.getPanelMembers()
+      });
+    }
+    return res;
+  }, [reloadFromStorage]);
+
   const updatePanelMember = useCallback((member: PanelMember) => {
     storageService.updatePanelMember(member);
     reloadFromStorage();
@@ -279,6 +292,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         getSlotCapacity,
         bookInterview,
         cancelInterview,
+        toggleEmailSent,
         updatePanelMember,
         addPanelMember,
         deletePanelMember,

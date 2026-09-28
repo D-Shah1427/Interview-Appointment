@@ -287,6 +287,37 @@ class StorageService {
     });
   }
 
+  public toggleBookingEmailSent(bookingId: string): boolean {
+    const bookings = this.getBookings();
+    const target = bookings.find(b => b.id === bookingId);
+    if (!target) return false;
+
+    const newStatus = !target.emailSent;
+    target.emailSent = newStatus;
+    target.emailSentAt = newStatus ? new Date().toISOString() : undefined;
+    safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
+
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      eventType: 'EMAIL_STATUS_UPDATED',
+      title: newStatus ? `Email Sent: ${target.candidateName}` : `Email Status Reset: ${target.candidateName}`,
+      description: newStatus
+        ? `Manual email invite & meeting link for ${target.candidateName} (${target.stageTitle}) marked as dispatched.`
+        : `Email dispatched status for ${target.candidateName} was unchecked.`,
+      metadata: { bookingId, emailSent: newStatus }
+    });
+
+    this.broadcast({
+      type: 'BOOKING_EMAIL_UPDATED',
+      bookingId,
+      emailSent: newStatus
+    });
+
+    return newStatus;
+  }
+
+
   // --- Audit Logs ---
   public getAuditLogs(): AuditLogEntry[] {
     try {

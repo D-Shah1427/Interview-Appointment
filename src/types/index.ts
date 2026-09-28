@@ -61,6 +61,8 @@ export interface InterviewBooking {
   assignedPanel: AssignedPanelist[];
   bookedAt: string;
   status: 'confirmed' | 'cancelled' | 'rescheduled';
+  emailSent?: boolean;
+  emailSentAt?: string;
 }
 
 export interface SlotCapacityInfo {
@@ -80,7 +82,7 @@ export interface SlotCapacityInfo {
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
-  eventType: 'SLOT_LOCKED' | 'INTERVIEW_BOOKED' | 'PANEL_ASSIGNED' | 'CAPACITY_REDUCED' | 'PANEL_UPDATED';
+  eventType: 'SLOT_LOCKED' | 'INTERVIEW_BOOKED' | 'PANEL_ASSIGNED' | 'CAPACITY_REDUCED' | 'PANEL_UPDATED' | 'EMAIL_STATUS_UPDATED';
   title: string;
   description: string;
   metadata?: Record<string, any>;
