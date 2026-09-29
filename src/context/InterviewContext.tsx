@@ -24,6 +24,7 @@ interface InterviewContextType {
     time: string;
   }) => Promise<InterviewBooking>;
   cancelInterview: (bookingId: string) => void;
+  restoreInterview: (bookingId: string) => { success: boolean; message?: string };
   toggleEmailSent: (bookingId: string) => boolean;
   updatePanelMember: (member: PanelMember) => void;
   addPanelMember: (member: Omit<PanelMember, 'id' | 'totalInterviewsConducted'>) => void;
@@ -132,6 +133,14 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           message: `An interview slot has been released back into available capacity.`,
           type: 'info'
         });
+      } else if (event.type === 'BOOKING_RESTORED') {
+        reloadFromStorage();
+        playChime('success');
+        setLiveAlert({
+          id: String(Date.now()),
+          message: `An interview has been restored to the confirmed schedule.`,
+          type: 'booking'
+        });
       } else if (event.type === 'PANEL_MEMBERS_UPDATED' || event.type === 'DATA_RESET' || event.type === 'STORAGE_CHANGE') {
         reloadFromStorage();
       }
@@ -214,6 +223,38 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [reloadFromStorage]);
 
+  const restoreInterview = useCallback((bookingId: string): { success: boolean; message?: string } => {
+    const target = bookings.find(b => b.id === bookingId);
+    if (!target) {
+      return { success: false, message: 'Booking record not found.' };
+    }
+
+    // Check if slot capacity allows re-activation
+    const capacityInfo = calculateSlotCapacity(target.date, target.time, panelMembers, bookings, target.durationMinutes || 30);
+    if (capacityInfo.isLocked || capacityInfo.remainingInterviewsCapacity <= 0) {
+      playChime('lock');
+      return {
+        success: false,
+        message: `Cannot restore: Slot ${target.date} at ${target.time} is no longer available (panel capacity is full).`
+      };
+    }
+
+    const ok = storageService.restoreBooking(bookingId);
+    if (ok) {
+      reloadFromStorage();
+      playChime('success');
+      if (cloudSyncService.isConfigured()) {
+        cloudSyncService.pushToCloud({
+          bookings: storageService.getBookings(),
+          panelMembers: storageService.getPanelMembers(),
+          passcode: safeGetItem('staff_portal_passcode') || undefined
+        });
+      }
+      return { success: true };
+    }
+    return { success: false, message: 'Failed to restore booking.' };
+  }, [bookings, panelMembers, reloadFromStorage]);
+
   const toggleEmailSent = useCallback((bookingId: string): boolean => {
     const res = storageService.toggleBookingEmailSent(bookingId);
     reloadFromStorage();
@@ -292,6 +333,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         getSlotCapacity,
         bookInterview,
         cancelInterview,
+        restoreInterview,
         toggleEmailSent,
         updatePanelMember,
         addPanelMember,

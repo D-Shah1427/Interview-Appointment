@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import { emailService } from '../../services/emailService';
-import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff, Cloud, RefreshCw, Download, Upload, ArrowUpDown, Send, Filter } from 'lucide-react';
+import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff, Cloud, RefreshCw, Download, Upload, ArrowUpDown, Send, Filter, RotateCcw, CalendarPlus } from 'lucide-react';
 import { getCandidateShareableUrl } from '../../utils/router';
 import { Department, Seniority, TimeWindow, PanelMember, InterviewBooking } from '../../types';
 import { getQuarterHourOptions, getMemberHoursForDate, DAY_CONFIG } from '../../utils/timeHelpers';
@@ -19,12 +19,15 @@ export const AdminDashboardView: React.FC = () => {
     bookings,
     panelMembers,
     auditLogs,
+    bookInterview,
     cancelInterview,
+    restoreInterview,
     toggleEmailSent,
     addPanelMember,
     deletePanelMember,
     updatePanelMember,
     selectedDate,
+    availableDates,
     triggerCloudSync,
     isCloudConfigured
   } = useInterview();
@@ -228,14 +231,34 @@ export const AdminDashboardView: React.FC = () => {
   // Scheduled Interviews Sorting & Email Dispatch Filter
   const [bookingSortBy, setBookingSortBy] = useState<'earliest' | 'latest' | 'recently-booked' | 'name'>('earliest');
   const [bookingEmailFilter, setBookingEmailFilter] = useState<'all' | 'pending' | 'sent'>('all');
+  const [bookingStatusFilter, setBookingStatusFilter] = useState<'confirmed' | 'cancelled' | 'all'>('confirmed');
   const [bookingSearchQuery, setBookingSearchQuery] = useState('');
+  const [undoToast, setUndoToast] = useState<{ booking: InterviewBooking } | null>(null);
+
+  // Manual Schedule Modal State
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualEmail, setManualEmail] = useState('');
+  const [manualPhone, setManualPhone] = useState('');
+  const [manualDate, setManualDate] = useState(() => availableDates[0]?.dateStr || '2026-10-01');
+  const [manualTime, setManualTime] = useState('10:00');
+  const [manualNotes, setManualNotes] = useState('');
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualLoading, setManualLoading] = useState(false);
 
   const confirmedBookings = useMemo(() => bookings.filter(b => b.status === 'confirmed'), [bookings]);
+  const cancelledBookings = useMemo(() => bookings.filter(b => b.status === 'cancelled'), [bookings]);
   const pendingEmailCount = useMemo(() => confirmedBookings.filter(b => !b.emailSent).length, [confirmedBookings]);
 
   // Bookings sorted and filtered according to user preferences (defaults to earliest meet time)
   const displayedBookings = useMemo(() => {
-    let list = [...confirmedBookings];
+    let list = [...bookings];
+
+    if (bookingStatusFilter === 'confirmed') {
+      list = list.filter(b => b.status === 'confirmed');
+    } else if (bookingStatusFilter === 'cancelled') {
+      list = list.filter(b => b.status === 'cancelled');
+    }
 
     if (bookingEmailFilter === 'pending') {
       list = list.filter(b => !b.emailSent);
@@ -264,7 +287,36 @@ export const AdminDashboardView: React.FC = () => {
     }
 
     return sortBookingsByEarliestMeetTime(list, 'asc');
-  }, [confirmedBookings, bookingEmailFilter, bookingSearchQuery, bookingSortBy]);
+  }, [bookings, bookingStatusFilter, bookingEmailFilter, bookingSearchQuery, bookingSortBy]);
+
+  const handleManualBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualName.trim() || !manualEmail.trim()) {
+      setManualError('Please provide candidate name and email address.');
+      return;
+    }
+    setManualLoading(true);
+    setManualError(null);
+    try {
+      await bookInterview({
+        candidateName: manualName.trim(),
+        candidateEmail: manualEmail.trim(),
+        candidatePhone: manualPhone.trim() || undefined,
+        date: manualDate,
+        time: manualTime,
+        notes: manualNotes.trim() || undefined
+      });
+      setShowManualModal(false);
+      setManualName('');
+      setManualEmail('');
+      setManualPhone('');
+      setManualNotes('');
+    } catch (err: any) {
+      setManualError(err.message || 'Failed to book slot.');
+    } finally {
+      setManualLoading(false);
+    }
+  };
 
   const allSentEmails = emailService.getAllSentEmails();
 
@@ -520,6 +572,21 @@ export const AdminDashboardView: React.FC = () => {
                 Add Panelist
               </button>
             )}
+
+            {activeTab === 'bookings' && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setManualError(null);
+                  setShowManualModal(true);
+                }}
+                style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <CalendarPlus size={14} />
+                Schedule Interview
+              </button>
+            )}
           </div>
 
           {activeTab === 'bookings' ? (
@@ -569,6 +636,21 @@ export const AdminDashboardView: React.FC = () => {
                     </select>
                   </div>
 
+                  {/* Status Filter */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Status:</span>
+                    <select
+                      className="input-field"
+                      value={bookingStatusFilter}
+                      onChange={(e) => setBookingStatusFilter(e.target.value as any)}
+                      style={{ padding: '0.4rem 0.65rem', fontSize: '0.82rem' }}
+                    >
+                      <option value="confirmed">Confirmed ({confirmedBookings.length})</option>
+                      <option value="cancelled">Cancelled / Released ({cancelledBookings.length})</option>
+                      <option value="all">All ({bookings.length})</option>
+                    </select>
+                  </div>
+
                   {/* Email Status Filter */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <Filter size={14} color="var(--primary)" />
@@ -586,7 +668,58 @@ export const AdminDashboardView: React.FC = () => {
                 </div>
               </div>
 
-              {confirmedBookings.length === 0 ? (
+              {/* Instant Undo Banner if an interview was just cancelled */}
+              {undoToast && (
+                <div
+                  style={{
+                    marginBottom: '1.25rem',
+                    padding: '0.85rem 1.15rem',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '1rem',
+                    flexWrap: 'wrap',
+                    animation: 'fadeIn 0.3s ease-in-out'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                    <span>
+                      Interview cancelled for <strong>{undoToast.booking.candidateName}</strong>. Slot <strong>{undoToast.booking.date} at {undoToast.booking.time}</strong> released back into pool.
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        const res = restoreInterview(undoToast.booking.id);
+                        if (res.success) {
+                          setUndoToast(null);
+                        } else {
+                          alert(res.message);
+                        }
+                      }}
+                      style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#059669', borderColor: '#059669' }}
+                    >
+                      <RotateCcw size={13} />
+                      Undo Cancellation
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUndoToast(null)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                      title="Dismiss"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {bookings.length === 0 ? (
                 <div
                   style={{
                     textAlign: 'center',
@@ -595,7 +728,7 @@ export const AdminDashboardView: React.FC = () => {
                     fontSize: '0.9rem'
                   }}
                 >
-                  No interviews scheduled yet.
+                  No interviews in system yet.
                 </div>
               ) : displayedBookings.length === 0 ? (
                 <div
@@ -608,7 +741,9 @@ export const AdminDashboardView: React.FC = () => {
                   }}
                 >
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.75rem' }}>
-                    No interviews match your search or filter criteria.
+                    {bookingStatusFilter === 'cancelled'
+                      ? 'No cancelled interviews found.'
+                      : 'No interviews match your search or filter criteria.'}
                   </p>
                   <button
                     type="button"
@@ -616,6 +751,7 @@ export const AdminDashboardView: React.FC = () => {
                     onClick={() => {
                       setBookingSearchQuery('');
                       setBookingEmailFilter('all');
+                      setBookingStatusFilter('confirmed');
                       setBookingSortBy('earliest');
                     }}
                     style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
@@ -646,19 +782,34 @@ export const AdminDashboardView: React.FC = () => {
                               <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
                                 {b.candidateName}
                               </h4>
-                              {friendlyDate.relativeBadge && (
+                              {b.status === 'cancelled' ? (
                                 <span
                                   style={{
                                     fontSize: '0.68rem',
                                     padding: '0.15rem 0.45rem',
                                     borderRadius: 'var(--radius-full)',
-                                    background: 'rgba(79, 70, 229, 0.1)',
-                                    color: 'var(--primary)',
+                                    background: 'rgba(239, 68, 68, 0.12)',
+                                    color: 'var(--color-danger, #ef4444)',
                                     fontWeight: 700
                                   }}
                                 >
-                                  {friendlyDate.relativeBadge}
+                                  ❌ Cancelled (Slot Released)
                                 </span>
+                              ) : (
+                                friendlyDate.relativeBadge && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      padding: '0.15rem 0.45rem',
+                                      borderRadius: 'var(--radius-full)',
+                                      background: 'rgba(79, 70, 229, 0.1)',
+                                      color: 'var(--primary)',
+                                      fontWeight: 700
+                                    }}
+                                  >
+                                    {friendlyDate.relativeBadge}
+                                  </span>
+                                )
                               )}
                             </div>
                             <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0' }}>
@@ -687,91 +838,110 @@ export const AdminDashboardView: React.FC = () => {
                               30-min session • {b.stageTitle}
                             </div>
                           </div>
-                        </div>
-
-                        {/* Manual Email Dispatch Status & Tick Action */}
-                        <div
-                          style={{
-                            background: b.emailSent ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
-                            border: `1px solid ${b.emailSent ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '0.65rem 0.85rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            flexWrap: 'wrap',
-                            gap: '0.6rem'
-                          }}
-                        >
-                          <label
+                                         {/* Manual Email Dispatch Status & Tick Action (Only for confirmed bookings) */}
+                        {b.status === 'confirmed' ? (
+                          <div
                             style={{
-                              display: 'inline-flex',
+                              background: b.emailSent ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                              border: `1px solid ${b.emailSent ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '0.65rem 0.85rem',
+                              display: 'flex',
                               alignItems: 'center',
-                              gap: '0.55rem',
-                              cursor: 'pointer',
-                              userSelect: 'none',
-                              fontSize: '0.82rem',
-                              fontWeight: 600,
-                              color: b.emailSent ? 'var(--color-success)' : 'var(--color-warning)'
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '0.6rem'
                             }}
                           >
-                            <input
-                              type="checkbox"
-                              checked={!!b.emailSent}
-                              onChange={() => toggleEmailSent(b.id)}
+                            <label
                               style={{
-                                width: '17px',
-                                height: '17px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.55rem',
                                 cursor: 'pointer',
-                                accentColor: 'var(--color-success)'
+                                userSelect: 'none',
+                                fontSize: '0.82rem',
+                                fontWeight: 600,
+                                color: b.emailSent ? 'var(--color-success)' : 'var(--color-warning)'
                               }}
-                            />
-                            <span>
-                              {b.emailSent ? '✅ Email Invite Dispatched' : '⚠️ Email Invite Pending'}
-                            </span>
-                            {b.emailSent && b.emailSentAt && (
-                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400 }}>
-                                (Ticked on {new Date(b.emailSentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at {new Date(b.emailSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!b.emailSent}
+                                onChange={() => toggleEmailSent(b.id)}
+                                style={{
+                                  width: '17px',
+                                  height: '17px',
+                                  cursor: 'pointer',
+                                  accentColor: 'var(--color-success)'
+                                }}
+                              />
+                              <span>
+                                {b.emailSent ? '✅ Email Invite Dispatched' : '⚠️ Email Invite Pending'}
                               </span>
-                            )}
-                            {!b.emailSent && (
-                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400 }}>
-                                — Admin sends calendar / Meet link outside platform
-                              </span>
-                            )}
-                          </label>
+                              {b.emailSent && b.emailSentAt && (
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+                                  (Ticked on {new Date(b.emailSentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at {new Date(b.emailSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                </span>
+                              )}
+                              {!b.emailSent && (
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+                                  — Admin sends calendar / Meet link outside platform
+                                </span>
+                              )}
+                            </label>
 
-                          <button
-                            type="button"
-                            className={b.emailSent ? "btn btn-secondary" : "btn btn-primary"}
-                            onClick={() => toggleEmailSent(b.id)}
+                            <button
+                              type="button"
+                              className={b.emailSent ? "btn btn-secondary" : "btn btn-primary"}
+                              onClick={() => toggleEmailSent(b.id)}
+                              style={{
+                                fontSize: '0.74rem',
+                                padding: '0.3rem 0.7rem',
+                                gap: '0.35rem',
+                                display: 'inline-flex',
+                                alignItems: 'center'
+                              }}
+                            >
+                              {b.emailSent ? (
+                                <>
+                                  <Check size={13} color="var(--color-success)" />
+                                  <span>Ticked (Sent)</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Send size={13} />
+                                  <span>Mark Email Sent</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                          <div
                             style={{
-                              fontSize: '0.74rem',
-                              padding: '0.3rem 0.7rem',
-                              gap: '0.35rem',
-                              display: 'inline-flex',
-                              alignItems: 'center'
+                              background: 'rgba(239, 68, 68, 0.05)',
+                              border: '1px dashed rgba(239, 68, 68, 0.3)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '0.65rem 0.85rem',
+                              fontSize: '0.8rem',
+                              color: 'var(--color-danger, #ef4444)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '0.5rem'
                             }}
                           >
-                            {b.emailSent ? (
-                              <>
-                                <Check size={13} color="var(--color-success)" />
-                                <span>Ticked (Sent)</span>
-                              </>
-                            ) : (
-                              <>
-                                <Send size={13} />
-                                <span>Mark Email Sent</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
+                            <span>⚠️ This interview is currently cancelled and released back into pool.</span>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Click <strong>Restore Interview (Undo)</strong> below to reactivate.</span>
+                          </div>
+                        )}
 
                         {/* Panel Avatars and Actions */}
                         <div
                           style={{
                             background: 'var(--bg-surface)',
-                            padding: '0.75rem 1rem',
+                            padding: '0.75rem',
                             borderRadius: 'var(--radius-sm)',
                             display: 'flex',
                             alignItems: 'center',
@@ -812,17 +982,39 @@ export const AdminDashboardView: React.FC = () => {
                             </div>
                           </div>
 
-                          <button
-                            type="button"
-                            className="btn btn-outline-danger"
-                            onClick={() => setBookingToCancel(b)}
-                            style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                            title="Cancel interview and release slot back into pool"
-                          >
-                            <Trash2 size={13} />
-                            Release Slot
-                          </button>
-                        </div>
+                          {b.status === 'cancelled' ? (
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => {
+                                const res = restoreInterview(b.id);
+                                if (res.success) {
+                                  if (undoToast && undoToast.booking.id === b.id) {
+                                    setUndoToast(null);
+                                  }
+                                } else {
+                                  alert(res.message);
+                                }
+                              }}
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#059669', borderColor: '#059669' }}
+                              title="Undo cancellation and restore slot to confirmed"
+                            >
+                              <RotateCcw size={13} />
+                              Restore Interview (Undo)
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-outline-danger"
+                              onClick={() => setBookingToCancel(b)}
+                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                              title="Cancel interview and release slot back into pool"
+                            >
+                              <Trash2 size={13} />
+                              Release Slot
+                            </button>
+                          )}
+                        </div>                   </div>
                       </div>
                     );
                   })}
@@ -1432,7 +1624,9 @@ export const AdminDashboardView: React.FC = () => {
               style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
               onClick={() => {
                 if (bookingToCancel) {
-                  cancelInterview(bookingToCancel.id);
+                  const toCancel = bookingToCancel;
+                  cancelInterview(toCancel.id);
+                  setUndoToast({ booking: toCancel });
                   setBookingToCancel(null);
                 }
               }}
@@ -1757,6 +1951,132 @@ function doPost(e) {
             </div>
           </div>
         </div>
+      </Modal>
+
+      {/* Schedule Interview (Manual Admin Entry) Modal */}
+      <Modal
+        isOpen={showManualModal}
+        onClose={() => setShowManualModal(false)}
+        title="Schedule / Restore Candidate Interview"
+        maxWidth="500px"
+      >
+        <form onSubmit={handleManualBooking} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
+            Manually schedule or restore an interview appointment for a candidate. The dynamic panel matching engine will automatically pair available panelists.
+          </p>
+
+          {manualError && (
+            <div style={{ padding: '0.65rem', borderRadius: 'var(--radius-sm)', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-danger)', fontSize: '0.82rem' }}>
+              {manualError}
+            </div>
+          )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Candidate Full Name *
+            </label>
+            <input
+              type="text"
+              required
+              className="input-field"
+              placeholder="e.g. Suparnojit Sarkar"
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Candidate Email *
+            </label>
+            <input
+              type="email"
+              required
+              className="input-field"
+              placeholder="e.g. suparnojit@example.com"
+              value={manualEmail}
+              onChange={(e) => setManualEmail(e.target.value)}
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Phone Number (Optional)
+            </label>
+            <input
+              type="tel"
+              className="input-field"
+              placeholder="+91..."
+              value={manualPhone}
+              onChange={(e) => setManualPhone(e.target.value)}
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Interview Date *
+              </label>
+              <input
+                type="date"
+                required
+                className="input-field"
+                value={manualDate}
+                onChange={(e) => setManualDate(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Start Time *
+              </label>
+              <select
+                className="input-field"
+                value={manualTime}
+                onChange={(e) => setManualTime(e.target.value)}
+                style={{ width: '100%' }}
+              >
+                {quarterHourOptions.map(t => (
+                  <option key={t.time} value={t.time}>{t.time} ({t.label})</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Internal Notes / Details
+            </label>
+            <textarea
+              className="input-field"
+              rows={2}
+              placeholder="e.g. Restored booking, standard 30m interview"
+              value={manualNotes}
+              onChange={(e) => setManualNotes(e.target.value)}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowManualModal(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={manualLoading}
+              className="btn btn-primary"
+            >
+              {manualLoading ? 'Confirming...' : 'Schedule & Confirm'}
+            </button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

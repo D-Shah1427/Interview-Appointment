@@ -287,6 +287,32 @@ class StorageService {
     });
   }
 
+  public restoreBooking(bookingId: string): boolean {
+    const bookings = this.getBookings();
+    const target = bookings.find(b => b.id === bookingId);
+    if (!target) return false;
+
+    target.status = 'confirmed';
+    safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
+
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      eventType: 'INTERVIEW_BOOKED',
+      title: `Interview restored for ${target.candidateName}`,
+      description: `Slot ${target.date} at ${target.time} has been restored back to confirmed status.`,
+      metadata: { bookingId: target.id, slot: `${target.date} ${target.time}` }
+    });
+
+    this.broadcast({
+      type: 'BOOKING_RESTORED',
+      bookingId,
+      slotKey: `${target.date}_${target.time}`
+    });
+
+    return true;
+  }
+
   public toggleBookingEmailSent(bookingId: string): boolean {
     const bookings = this.getBookings();
     const target = bookings.find(b => b.id === bookingId);
