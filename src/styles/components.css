@@ -161,6 +161,15 @@
   background: var(--color-danger-bg);
 }
 
+.btn-outline-success {
+  background: transparent;
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+.btn-outline-success:hover {
+  background: var(--color-success-bg);
+}
+
 /* Layout */
 .page-container {
   max-width: 1100px;

@@ -27,7 +27,12 @@ Copy and paste the exact code below into the Apps Script editor:
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
-  var val = sheet.getRange("A1").getValue();
+  var lastRow = sheet.getLastRow();
+  var val = "";
+  if (lastRow > 0) {
+    var values = sheet.getRange(1, 1, lastRow, 1).getValues();
+    val = values.map(function(r) { return r[0]; }).join("");
+  }
   return ContentService.createTextOutput(val || "{}")
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -37,27 +42,34 @@ function doPost(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var dataSheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
     var raw = e.postData.contents;
-    dataSheet.getRange("A1").setValue(raw);
 
-    // Populate human-readable "Bookings" sheet tab for HR / Team
+    // Support unlimited payload size without Google Sheets 50,000 char-per-cell limit by chunking across rows
+    var chunkSize = 30000;
+    var chunks = [];
+    for (var i = 0; i < raw.length; i += chunkSize) {
+      chunks.push([raw.substring(i, i + chunkSize)]);
+    }
+    dataSheet.clear();
+    dataSheet.getRange(1, 1, chunks.length, 1).setValues(chunks);
+
+    // Populate human-readable "Bookings" sheet tab for HR / Team using fast batch write
     var parsed = JSON.parse(raw);
     if (parsed.bookings && Array.isArray(parsed.bookings)) {
       var bSheet = ss.getSheetByName("Bookings") || ss.insertSheet("Bookings");
-      bSheet.clear();
-      bSheet.appendRow([
-        "Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone",
-        "Assigned Panel", "Status", "Booked At"
-      ]);
-      var header = bSheet.getRange(1, 1, 1, 9);
-      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
-
+      var rows = [
+        ["Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone", "Assigned Panel", "Status", "Booked At"]
+      ];
       parsed.bookings.forEach(function(b) {
         var panel = (b.assignedPanel || []).map(function(p) { return p.name; }).join(", ");
-        bSheet.appendRow([
+        rows.push([
           b.id, b.date, b.time, b.candidateName, b.candidateEmail,
           b.candidatePhone || "", panel, b.status, b.bookedAt
         ]);
       });
+      bSheet.clear();
+      bSheet.getRange(1, 1, rows.length, 9).setValues(rows);
+      var header = bSheet.getRange(1, 1, 1, 9);
+      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
       bSheet.autoResizeColumns(1, 9);
     }
 

@@ -226,13 +226,25 @@ class StorageService {
   public getBookings(): InterviewBooking[] {
     try {
       const data = safeGetItem(STORAGE_KEYS.BOOKINGS);
-      return data ? JSON.parse(data) : [];
+      if (!data) return [];
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((b: any) => ({
+        ...b,
+        meetingLink: b.meetingLink || 'Video meeting link will be sent via email prior to interview',
+        stageId: b.stageId || 'interview-standard',
+        stageTitle: b.stageTitle || 'Interview Appointment',
+        updatedAt: b.updatedAt || b.bookedAt || new Date().toISOString()
+      }));
     } catch {
       return [];
     }
   }
 
   public saveBooking(booking: InterviewBooking): void {
+    if (!booking.updatedAt) {
+      booking.updatedAt = booking.bookedAt || new Date().toISOString();
+    }
     const bookings = this.getBookings();
     bookings.push(booking);
     safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
@@ -270,6 +282,7 @@ class StorageService {
     if (!target) return;
 
     target.status = 'cancelled';
+    target.updatedAt = new Date().toISOString();
     safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
 
     this.addAuditLog({
@@ -293,6 +306,7 @@ class StorageService {
     if (!target) return false;
 
     target.status = 'confirmed';
+    target.updatedAt = new Date().toISOString();
     safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
 
     this.addAuditLog({
@@ -313,6 +327,60 @@ class StorageService {
     return true;
   }
 
+  public completeBooking(bookingId: string): boolean {
+    const bookings = this.getBookings();
+    const target = bookings.find(b => b.id === bookingId);
+    if (!target) return false;
+
+    target.status = 'completed';
+    target.updatedAt = new Date().toISOString();
+    safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
+
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      eventType: 'INTERVIEW_COMPLETED',
+      title: `Interview completed for ${target.candidateName}`,
+      description: `Interview on ${target.date} at ${target.time} has been moved to completed section.`,
+      metadata: { bookingId: target.id, slot: `${target.date} ${target.time}` }
+    });
+
+    this.broadcast({
+      type: 'BOOKING_COMPLETED',
+      bookingId,
+      slotKey: `${target.date}_${target.time}`
+    });
+
+    return true;
+  }
+
+  public reopenBooking(bookingId: string): boolean {
+    const bookings = this.getBookings();
+    const target = bookings.find(b => b.id === bookingId);
+    if (!target) return false;
+
+    target.status = 'confirmed';
+    target.updatedAt = new Date().toISOString();
+    safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
+
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      eventType: 'INTERVIEW_BOOKED',
+      title: `Interview re-opened for ${target.candidateName}`,
+      description: `Interview on ${target.date} at ${target.time} has been moved back to active upcoming schedule.`,
+      metadata: { bookingId: target.id, slot: `${target.date} ${target.time}` }
+    });
+
+    this.broadcast({
+      type: 'BOOKING_RESTORED',
+      bookingId,
+      slotKey: `${target.date}_${target.time}`
+    });
+
+    return true;
+  }
+
   public toggleBookingEmailSent(bookingId: string): boolean {
     const bookings = this.getBookings();
     const target = bookings.find(b => b.id === bookingId);
@@ -321,6 +389,7 @@ class StorageService {
     const newStatus = !target.emailSent;
     target.emailSent = newStatus;
     target.emailSentAt = newStatus ? new Date().toISOString() : undefined;
+    target.updatedAt = new Date().toISOString();
     safeSetItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
 
     this.addAuditLog({

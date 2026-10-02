@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import { emailService } from '../../services/emailService';
-import { Users, Calendar, ShieldCheck, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Lock, Eye, EyeOff, Cloud, RefreshCw, Download, Upload, ArrowUpDown, Send, Filter, RotateCcw, CalendarPlus } from 'lucide-react';
+import { Users, Calendar, Trash2, CheckCircle2, Mail, Link, Copy, Check, ExternalLink, UserPlus, Clock, X, Edit3, Plus, KeyRound, Eye, EyeOff, Cloud, RefreshCw, Download, Upload, ArrowUpDown, Send, Filter, RotateCcw, CalendarPlus } from 'lucide-react';
 import { getCandidateShareableUrl } from '../../utils/router';
 import { Department, Seniority, TimeWindow, PanelMember, InterviewBooking } from '../../types';
-import { getQuarterHourOptions, getMemberHoursForDate, DAY_CONFIG } from '../../utils/timeHelpers';
-import { sortBookingsByEarliestMeetTime, formatFriendlyMeetDate } from '../../utils/dateHelpers';
+import { getQuarterHourOptions, getMemberHoursForDate } from '../../utils/timeHelpers';
+import { sortBookingsByEarliestMeetTime, formatFriendlyMeetDate, isBookingPast } from '../../utils/dateHelpers';
 import { Modal } from '../Common/Modal';
 import { useStaffAuth } from '../../context/StaffAuthContext';
 import { PanelScheduleModal } from '../PanelManagement/PanelScheduleModal';
@@ -22,6 +22,9 @@ export const AdminDashboardView: React.FC = () => {
     bookInterview,
     cancelInterview,
     restoreInterview,
+    completeInterview,
+    reopenInterview,
+    markAllPastAsCompleted,
     toggleEmailSent,
     addPanelMember,
     deletePanelMember,
@@ -228,10 +231,10 @@ export const AdminDashboardView: React.FC = () => {
     ]);
   };
 
-  // Scheduled Interviews Sorting & Email Dispatch Filter
+  // Scheduled Interviews Section, Sorting & Email Dispatch Filter
+  const [scheduleSection, setScheduleSection] = useState<'upcoming' | 'completed' | 'cancelled' | 'all'>('upcoming');
   const [bookingSortBy, setBookingSortBy] = useState<'earliest' | 'latest' | 'recently-booked' | 'name'>('earliest');
   const [bookingEmailFilter, setBookingEmailFilter] = useState<'all' | 'pending' | 'sent'>('all');
-  const [bookingStatusFilter, setBookingStatusFilter] = useState<'confirmed' | 'cancelled' | 'all'>('confirmed');
   const [bookingSearchQuery, setBookingSearchQuery] = useState('');
   const [undoToast, setUndoToast] = useState<{ booking: InterviewBooking } | null>(null);
 
@@ -246,18 +249,36 @@ export const AdminDashboardView: React.FC = () => {
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualLoading, setManualLoading] = useState(false);
 
-  const confirmedBookings = useMemo(() => bookings.filter(b => b.status === 'confirmed'), [bookings]);
-  const cancelledBookings = useMemo(() => bookings.filter(b => b.status === 'cancelled'), [bookings]);
-  const pendingEmailCount = useMemo(() => confirmedBookings.filter(b => !b.emailSent).length, [confirmedBookings]);
+  // Categorize bookings: Upcoming (coming up), Completed (finished/past), Cancelled (released)
+  const upcomingBookings = useMemo(() => {
+    return bookings.filter(b => b.status === 'confirmed' && !isBookingPast(b));
+  }, [bookings]);
+
+  const completedBookings = useMemo(() => {
+    return bookings.filter(b => b.status === 'completed' || (b.status === 'confirmed' && isBookingPast(b)));
+  }, [bookings]);
+
+  const cancelledBookings = useMemo(() => {
+    return bookings.filter(b => b.status === 'cancelled');
+  }, [bookings]);
+
+  // Count of confirmed interviews whose scheduled time has already passed
+  const pastUnmarkedCount = useMemo(() => {
+    return bookings.filter(b => b.status === 'confirmed' && isBookingPast(b)).length;
+  }, [bookings]);
+
+  const pendingEmailCount = useMemo(() => upcomingBookings.filter(b => !b.emailSent).length, [upcomingBookings]);
 
   // Bookings sorted and filtered according to user preferences (defaults to earliest meet time)
   const displayedBookings = useMemo(() => {
     let list = [...bookings];
 
-    if (bookingStatusFilter === 'confirmed') {
-      list = list.filter(b => b.status === 'confirmed');
-    } else if (bookingStatusFilter === 'cancelled') {
-      list = list.filter(b => b.status === 'cancelled');
+    if (scheduleSection === 'upcoming') {
+      list = upcomingBookings;
+    } else if (scheduleSection === 'completed') {
+      list = completedBookings;
+    } else if (scheduleSection === 'cancelled') {
+      list = cancelledBookings;
     }
 
     if (bookingEmailFilter === 'pending') {
@@ -287,7 +308,7 @@ export const AdminDashboardView: React.FC = () => {
     }
 
     return sortBookingsByEarliestMeetTime(list, 'asc');
-  }, [bookings, bookingStatusFilter, bookingEmailFilter, bookingSearchQuery, bookingSortBy]);
+  }, [bookings, scheduleSection, upcomingBookings, completedBookings, cancelledBookings, bookingEmailFilter, bookingSearchQuery, bookingSortBy]);
 
   const handleManualBooking = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -334,18 +355,25 @@ export const AdminDashboardView: React.FC = () => {
         <div
           style={{
             background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
+            border: scheduleSection === 'upcoming' ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-lg)',
             padding: '1.25rem',
-            boxShadow: 'var(--shadow-sm)'
+            boxShadow: 'var(--shadow-sm)',
+            cursor: 'pointer',
+            transition: 'border-color 0.2s'
           }}
+          onClick={() => {
+            setActiveTab('bookings');
+            setScheduleSection('upcoming');
+          }}
+          title="Click to view Upcoming Interviews"
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Active Interviews</span>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Upcoming Interviews</span>
             <Calendar size={18} color="var(--primary)" />
           </div>
           <div style={{ fontSize: '2.2rem', fontWeight: 800, margin: '0.4rem 0 0.2rem', color: 'var(--text-primary)' }}>
-            {confirmedBookings.length}
+            {upcomingBookings.length}
           </div>
           {pendingEmailCount > 0 ? (
             <div style={{ fontSize: '0.75rem', color: 'var(--color-warning)', display: 'flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600 }}>
@@ -354,9 +382,37 @@ export const AdminDashboardView: React.FC = () => {
           ) : (
             <div style={{ fontSize: '0.75rem', color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600 }}>
               <CheckCircle2 size={13} />
-              <span>All email invites dispatched</span>
+              <span>All upcoming invites dispatched</span>
             </div>
           )}
+        </div>
+
+        <div
+          style={{
+            background: 'var(--bg-surface)',
+            border: scheduleSection === 'completed' ? '2px solid #059669' : '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '1.25rem',
+            boxShadow: 'var(--shadow-sm)',
+            cursor: 'pointer',
+            transition: 'border-color 0.2s'
+          }}
+          onClick={() => {
+            setActiveTab('bookings');
+            setScheduleSection('completed');
+          }}
+          title="Click to view Completed / Past Interviews"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Completed Interviews</span>
+            <CheckCircle2 size={18} color="#059669" />
+          </div>
+          <div style={{ fontSize: '2.2rem', fontWeight: 800, margin: '0.4rem 0 0.2rem', color: '#059669' }}>
+            {completedBookings.length}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+            Finished sessions (kept in Sheet)
+          </div>
         </div>
 
         <div
@@ -376,28 +432,7 @@ export const AdminDashboardView: React.FC = () => {
             {panelMembers.length}
           </div>
           <div style={{ fontSize: '0.75rem', color: '#0284c7', fontWeight: 600 }}>
-            Total interviewers
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-lg)',
-            padding: '1.25rem',
-            boxShadow: 'var(--shadow-sm)'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Panel Size Target</span>
-            <ShieldCheck size={18} color="#059669" />
-          </div>
-          <div style={{ fontSize: '2.2rem', fontWeight: 800, margin: '0.4rem 0 0.2rem', color: 'var(--text-primary)' }}>
-            4 <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted)' }}>(Min 3, Max 5)</span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: '#059669', fontWeight: 600 }}>
-            Optimum 4 per interview
+            Total interviewers available
           </div>
         </div>
 
@@ -539,7 +574,7 @@ export const AdminDashboardView: React.FC = () => {
                 onClick={() => setActiveTab('bookings')}
                 style={{ fontSize: '0.82rem', padding: '0.4rem 0.85rem' }}
               >
-                Scheduled Interviews ({confirmedBookings.length})
+                Scheduled Interviews ({upcomingBookings.length})
               </button>
               <button
                 type="button"
@@ -591,6 +626,100 @@ export const AdminDashboardView: React.FC = () => {
 
           {activeTab === 'bookings' ? (
             <div>
+              {/* Schedule Section Selector: Upcoming vs Completed vs Cancelled */}
+              <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className={`btn ${scheduleSection === 'upcoming' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setScheduleSection('upcoming')}
+                  style={{ fontSize: '0.82rem', padding: '0.45rem 0.95rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                >
+                  <Calendar size={14} />
+                  <span>Upcoming ({upcomingBookings.length})</span>
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${scheduleSection === 'completed' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setScheduleSection('completed')}
+                  style={{
+                    fontSize: '0.82rem',
+                    padding: '0.45rem 0.95rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    color: scheduleSection === 'completed' ? '#ffffff' : '#059669',
+                    borderColor: scheduleSection === 'completed' ? 'transparent' : 'rgba(5, 150, 105, 0.4)'
+                  }}
+                >
+                  <CheckCircle2 size={14} color={scheduleSection === 'completed' ? '#ffffff' : '#059669'} />
+                  <span>Completed / Past ({completedBookings.length})</span>
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${scheduleSection === 'cancelled' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setScheduleSection('cancelled')}
+                  style={{ fontSize: '0.82rem', padding: '0.45rem 0.95rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                >
+                  <X size={14} />
+                  <span>Cancelled ({cancelledBookings.length})</span>
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${scheduleSection === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setScheduleSection('all')}
+                  style={{ fontSize: '0.82rem', padding: '0.45rem 0.95rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                >
+                  <span>All Bookings ({bookings.length})</span>
+                </button>
+              </div>
+
+              {/* Smart Helper Banner: Move all past interviews to completed */}
+              {pastUnmarkedCount > 0 && scheduleSection === 'upcoming' && (
+                <div
+                  style={{
+                    marginBottom: '1.25rem',
+                    padding: '0.75rem 1.15rem',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem' }}>
+                    <Clock size={16} color="var(--primary)" />
+                    <span>
+                      You have <strong>{pastUnmarkedCount}</strong> previous interview{pastUnmarkedCount > 1 ? 's' : ''} whose scheduled time has passed.
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setScheduleSection('completed')}
+                      style={{ fontSize: '0.76rem', padding: '0.3rem 0.65rem' }}
+                    >
+                      View Completed Section
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        markAllPastAsCompleted();
+                        setScheduleSection('upcoming');
+                      }}
+                      style={{ fontSize: '0.76rem', padding: '0.3rem 0.65rem', background: '#059669', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <CheckCircle2 size={13} />
+                      <span>Move All Past to Completed</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Search, Sort & Email Filter Toolbar */}
               <div
                 style={{
@@ -636,21 +765,6 @@ export const AdminDashboardView: React.FC = () => {
                     </select>
                   </div>
 
-                  {/* Status Filter */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Status:</span>
-                    <select
-                      className="input-field"
-                      value={bookingStatusFilter}
-                      onChange={(e) => setBookingStatusFilter(e.target.value as any)}
-                      style={{ padding: '0.4rem 0.65rem', fontSize: '0.82rem' }}
-                    >
-                      <option value="confirmed">Confirmed ({confirmedBookings.length})</option>
-                      <option value="cancelled">Cancelled / Released ({cancelledBookings.length})</option>
-                      <option value="all">All ({bookings.length})</option>
-                    </select>
-                  </div>
-
                   {/* Email Status Filter */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <Filter size={14} color="var(--primary)" />
@@ -660,9 +774,9 @@ export const AdminDashboardView: React.FC = () => {
                       onChange={(e) => setBookingEmailFilter(e.target.value as any)}
                       style={{ padding: '0.4rem 0.65rem', fontSize: '0.82rem' }}
                     >
-                      <option value="all">All Email Statuses ({confirmedBookings.length})</option>
+                      <option value="all">All Email Statuses</option>
                       <option value="pending">⚠️ Email Pending ({pendingEmailCount})</option>
-                      <option value="sent">✅ Email Sent ({confirmedBookings.length - pendingEmailCount})</option>
+                      <option value="sent">✅ Email Sent ({upcomingBookings.length - pendingEmailCount})</option>
                     </select>
                   </div>
                 </div>
@@ -741,8 +855,10 @@ export const AdminDashboardView: React.FC = () => {
                   }}
                 >
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.75rem' }}>
-                    {bookingStatusFilter === 'cancelled'
+                    {scheduleSection === 'cancelled'
                       ? 'No cancelled interviews found.'
+                      : scheduleSection === 'completed'
+                      ? 'No completed interviews found.'
                       : 'No interviews match your search or filter criteria.'}
                   </p>
                   <button
@@ -751,7 +867,7 @@ export const AdminDashboardView: React.FC = () => {
                     onClick={() => {
                       setBookingSearchQuery('');
                       setBookingEmailFilter('all');
-                      setBookingStatusFilter('confirmed');
+                      setScheduleSection('upcoming');
                       setBookingSortBy('earliest');
                     }}
                     style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
@@ -794,6 +910,32 @@ export const AdminDashboardView: React.FC = () => {
                                   }}
                                 >
                                   ❌ Cancelled (Slot Released)
+                                </span>
+                              ) : b.status === 'completed' ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    padding: '0.15rem 0.45rem',
+                                    borderRadius: 'var(--radius-full)',
+                                    background: 'rgba(16, 185, 129, 0.12)',
+                                    color: 'var(--color-success, #10b981)',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  ✅ Completed
+                                </span>
+                              ) : isBookingPast(b) ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    padding: '0.15rem 0.45rem',
+                                    borderRadius: 'var(--radius-full)',
+                                    background: 'rgba(107, 114, 128, 0.12)',
+                                    color: 'var(--text-muted)',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  🕒 Finished / Past
                                 </span>
                               ) : (
                                 friendlyDate.relativeBadge && (
@@ -838,8 +980,10 @@ export const AdminDashboardView: React.FC = () => {
                               30-min session • {b.stageTitle}
                             </div>
                           </div>
-                                         {/* Manual Email Dispatch Status & Tick Action (Only for confirmed bookings) */}
-                        {b.status === 'confirmed' ? (
+                        </div>
+
+                        {/* Manual Email Dispatch Status & Tick Action (For confirmed and completed bookings) */}
+                        {b.status !== 'cancelled' ? (
                           <div
                             style={{
                               background: b.emailSent ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
@@ -1002,19 +1146,61 @@ export const AdminDashboardView: React.FC = () => {
                               <RotateCcw size={13} />
                               Restore Interview (Undo)
                             </button>
+                          ) : b.status === 'completed' ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => reopenInterview(b.id)}
+                                style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                                title="Move this interview back to Upcoming"
+                              >
+                                <RotateCcw size={13} />
+                                Move to Upcoming
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-outline-danger"
+                                onClick={() => setBookingToCancel(b)}
+                                style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                                title="Delete or cancel this booking"
+                              >
+                                <Trash2 size={13} />
+                                Release Slot
+                              </button>
+                            </div>
                           ) : (
-                            <button
-                              type="button"
-                              className="btn btn-outline-danger"
-                              onClick={() => setBookingToCancel(b)}
-                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                              title="Cancel interview and release slot back into pool"
-                            >
-                              <Trash2 size={13} />
-                              Release Slot
-                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-outline-success"
+                                onClick={() => completeInterview(b.id)}
+                                style={{
+                                  padding: '0.35rem 0.75rem',
+                                  fontSize: '0.75rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  fontWeight: 600
+                                }}
+                                title="Mark interview as completed and move it to the Completed section"
+                              >
+                                <CheckCircle2 size={13} />
+                                Mark Completed
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-outline-danger"
+                                onClick={() => setBookingToCancel(b)}
+                                style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                                title="Cancel interview and release slot back into pool"
+                              >
+                                <Trash2 size={13} />
+                                Release Slot
+                              </button>
+                            </div>
                           )}
-                        </div>                   </div>
+                        </div>
                       </div>
                     );
                   })}
@@ -1815,7 +2001,12 @@ export const AdminDashboardView: React.FC = () => {
 {`function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
-  var val = sheet.getRange("A1").getValue();
+  var lastRow = sheet.getLastRow();
+  var val = "";
+  if (lastRow > 0) {
+    var values = sheet.getRange(1, 1, lastRow, 1).getValues();
+    val = values.map(function(r) { return r[0]; }).join("");
+  }
   return ContentService.createTextOutput(val || "{}")
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -1825,20 +2016,34 @@ function doPost(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var dataSheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
     var raw = e.postData.contents;
-    dataSheet.getRange("A1").setValue(raw);
 
-    // Populate a readable "Bookings" spreadsheet tab for HR / Team
+    // Support unlimited payload size without Google Sheets 50,000 char-per-cell limit
+    var chunkSize = 30000;
+    var chunks = [];
+    for (var i = 0; i < raw.length; i += chunkSize) {
+      chunks.push([raw.substring(i, i + chunkSize)]);
+    }
+    dataSheet.clear();
+    dataSheet.getRange(1, 1, chunks.length, 1).setValues(chunks);
+
+    // Populate a readable "Bookings" spreadsheet tab for HR / Team with fast batch write
     var parsed = JSON.parse(raw);
     if (parsed.bookings && Array.isArray(parsed.bookings)) {
       var bSheet = ss.getSheetByName("Bookings") || ss.insertSheet("Bookings");
-      bSheet.clear();
-      bSheet.appendRow(["Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone", "Assigned Panel", "Status", "Booked At"]);
-      var header = bSheet.getRange(1, 1, 1, 9);
-      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
+      var rows = [
+        ["Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone", "Assigned Panel", "Status", "Booked At"]
+      ];
       parsed.bookings.forEach(function(b) {
         var panel = (b.assignedPanel || []).map(function(p) { return p.name; }).join(", ");
-        bSheet.appendRow([b.id, b.date, b.time, b.candidateName, b.candidateEmail, b.candidatePhone || "", panel, b.status, b.bookedAt]);
+        rows.push([
+          b.id, b.date, b.time, b.candidateName, b.candidateEmail,
+          b.candidatePhone || "", panel, b.status, b.bookedAt
+        ]);
       });
+      bSheet.clear();
+      bSheet.getRange(1, 1, rows.length, 9).setValues(rows);
+      var header = bSheet.getRange(1, 1, 1, 9);
+      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
       bSheet.autoResizeColumns(1, 9);
     }
     return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
@@ -1856,7 +2061,12 @@ function doPost(e) {
                     navigator.clipboard.writeText(`function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
-  var val = sheet.getRange("A1").getValue();
+  var lastRow = sheet.getLastRow();
+  var val = "";
+  if (lastRow > 0) {
+    var values = sheet.getRange(1, 1, lastRow, 1).getValues();
+    val = values.map(function(r) { return r[0]; }).join("");
+  }
   return ContentService.createTextOutput(val || "{}")
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -1866,19 +2076,32 @@ function doPost(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var dataSheet = ss.getSheetByName("_AppData") || ss.insertSheet("_AppData");
     var raw = e.postData.contents;
-    dataSheet.getRange("A1").setValue(raw);
+
+    var chunkSize = 30000;
+    var chunks = [];
+    for (var i = 0; i < raw.length; i += chunkSize) {
+      chunks.push([raw.substring(i, i + chunkSize)]);
+    }
+    dataSheet.clear();
+    dataSheet.getRange(1, 1, chunks.length, 1).setValues(chunks);
 
     var parsed = JSON.parse(raw);
     if (parsed.bookings && Array.isArray(parsed.bookings)) {
       var bSheet = ss.getSheetByName("Bookings") || ss.insertSheet("Bookings");
-      bSheet.clear();
-      bSheet.appendRow(["Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone", "Assigned Panel", "Status", "Booked At"]);
-      var header = bSheet.getRange(1, 1, 1, 9);
-      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
+      var rows = [
+        ["Booking ID", "Date", "Time", "Candidate Name", "Email", "Phone", "Assigned Panel", "Status", "Booked At"]
+      ];
       parsed.bookings.forEach(function(b) {
         var panel = (b.assignedPanel || []).map(function(p) { return p.name; }).join(", ");
-        bSheet.appendRow([b.id, b.date, b.time, b.candidateName, b.candidateEmail, b.candidatePhone || "", panel, b.status, b.bookedAt]);
+        rows.push([
+          b.id, b.date, b.time, b.candidateName, b.candidateEmail,
+          b.candidatePhone || "", panel, b.status, b.bookedAt
+        ]);
       });
+      bSheet.clear();
+      bSheet.getRange(1, 1, rows.length, 9).setValues(rows);
+      var header = bSheet.getRange(1, 1, 1, 9);
+      header.setBackground("#4f46e5").setFontColor("#ffffff").setFontWeight("bold");
       bSheet.autoResizeColumns(1, 9);
     }
     return ContentService.createTextOutput(JSON.stringify({ status: "success" }))

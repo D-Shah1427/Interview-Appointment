@@ -111,3 +111,14 @@ export function formatFriendlyMeetDate(dateStr: string): { formatted: string; re
   return { formatted };
 }
 
+/**
+ * Checks whether an interview booking has already passed its scheduled end time.
+ */
+export function isBookingPast(booking: { date: string; time: string; durationMinutes?: number }): boolean {
+  if (!booking || !booking.date || !booking.time) return false;
+  const meetTime = getBookingMeetTimeValue(booking);
+  if (!meetTime) return false;
+  const durationMs = (booking.durationMinutes || 30) * 60 * 1000;
+  return meetTime + durationMs < Date.now();
+}
+

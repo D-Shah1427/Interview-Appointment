@@ -2,9 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { PanelMember, InterviewBooking, SlotCapacityInfo, AuditLogEntry } from '../types';
 import { storageService, playChime, safeGetItem, safeSetItem } from '../services/storage';
 import { calculateSlotCapacity, dynamicallySelectPanel } from '../services/panelMatcher';
-import { emailService } from '../services/emailService';
-import { getUpcomingWeekdays } from '../utils/dateHelpers';
+import { getUpcomingWeekdays, isBookingPast } from '../utils/dateHelpers';
 import { cloudSyncService } from '../services/cloudSyncService';
+import { emailService } from '../services/emailService';
 
 interface InterviewContextType {
   panelMembers: PanelMember[];
@@ -25,6 +25,9 @@ interface InterviewContextType {
   }) => Promise<InterviewBooking>;
   cancelInterview: (bookingId: string) => void;
   restoreInterview: (bookingId: string) => { success: boolean; message?: string };
+  completeInterview: (bookingId: string) => void;
+  reopenInterview: (bookingId: string) => void;
+  markAllPastAsCompleted: () => number;
   toggleEmailSent: (bookingId: string) => boolean;
   updatePanelMember: (member: PanelMember) => void;
   addPanelMember: (member: Omit<PanelMember, 'id' | 'totalInterviewsConducted'>) => void;
@@ -66,31 +69,107 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const remote = await cloudSyncService.pullFromCloud();
       if (remote) {
         let changed = false;
-        if (Array.isArray(remote.panelMembers)) {
-          storageService.savePanelMembers(remote.panelMembers);
-          changed = true;
-        }
-        if (Array.isArray(remote.bookings)) {
-          safeSetItem('interview_bookings_v1', JSON.stringify(remote.bookings));
-          changed = true;
-        }
-        if (remote.passcode && typeof remote.passcode === 'string' && remote.passcode.length >= 4) {
-          safeSetItem('staff_portal_passcode', remote.passcode);
-          changed = true;
+
+        // 1. Sync panel members if changed
+        if (Array.isArray(remote.panelMembers) && remote.panelMembers.length > 0) {
+          const localPanel = storageService.getPanelMembers();
+          if (JSON.stringify(localPanel) !== JSON.stringify(remote.panelMembers)) {
+            storageService.savePanelMembers(remote.panelMembers);
+            changed = true;
+          }
         }
 
-        if (changed) {
+        // 2. Non-destructive bidirectional merge for bookings
+        const localBookings = storageService.getBookings();
+        const remoteBookings = Array.isArray(remote.bookings) ? remote.bookings : [];
+
+        const bookingMap = new Map<string, InterviewBooking>();
+        localBookings.forEach(b => bookingMap.set(b.id, b));
+
+        let localHasUnsyncedBookings = false;
+        let remoteHasNewBookings = false;
+
+        remoteBookings.forEach(remoteB => {
+          const localB = bookingMap.get(remoteB.id);
+          if (!localB) {
+            // New booking from remote that wasn't in local (e.g. from an external candidate)
+            bookingMap.set(remoteB.id, remoteB);
+            remoteHasNewBookings = true;
+            changed = true;
+          } else {
+            // Both have it - compare updatedAt / bookedAt
+            const localTime = new Date(localB.updatedAt || localB.bookedAt).getTime() || 0;
+            const remoteTime = new Date(remoteB.updatedAt || remoteB.bookedAt).getTime() || 0;
+
+            if (remoteTime > localTime) {
+              bookingMap.set(remoteB.id, remoteB);
+              changed = true;
+            } else if (localTime > remoteTime) {
+              localHasUnsyncedBookings = true;
+            } else {
+              // Same timestamp - merge statuses non-destructively
+              const merged: InterviewBooking = {
+                ...remoteB,
+                ...localB,
+                emailSent: localB.emailSent || remoteB.emailSent,
+                emailSentAt: localB.emailSentAt || remoteB.emailSentAt,
+                status: (localB.status === 'cancelled' || remoteB.status === 'cancelled')
+                  ? 'cancelled'
+                  : 'confirmed'
+              };
+              if (JSON.stringify(merged) !== JSON.stringify(localB)) {
+                changed = true;
+              }
+              bookingMap.set(remoteB.id, merged);
+            }
+          }
+        });
+
+        // Check if local has bookings that remote lacks completely
+        localBookings.forEach(localB => {
+          if (!remoteBookings.some(rb => rb.id === localB.id)) {
+            localHasUnsyncedBookings = true;
+          }
+        });
+
+        const mergedBookings = Array.from(bookingMap.values());
+
+        // Save merged list if changes detected or unsynced items found
+        if (changed || localHasUnsyncedBookings) {
+          safeSetItem('interview_bookings_v1', JSON.stringify(mergedBookings));
           reloadFromStorage();
-        } else {
-          // Initial seed: remote sheet is empty or newly connected, populate it from local state
+        }
+
+        // If local has bookings that remote lacked, immediately push to cloud
+        if (localHasUnsyncedBookings) {
           await cloudSyncService.pushToCloud({
+            bookings: mergedBookings,
             panelMembers: storageService.getPanelMembers(),
-            bookings: storageService.getBookings(),
             passcode: safeGetItem('staff_portal_passcode') || undefined
           });
         }
+
+        // Passcode sync
+        if (remote.passcode && typeof remote.passcode === 'string' && remote.passcode.length >= 4) {
+          if (safeGetItem('staff_portal_passcode') !== remote.passcode) {
+            safeSetItem('staff_portal_passcode', remote.passcode);
+            changed = true;
+            reloadFromStorage();
+          }
+        }
+
+        if (remoteHasNewBookings) {
+          playChime('alert');
+          setLiveAlert({
+            id: String(Date.now()),
+            message: 'New candidate bookings synchronized from cloud.',
+            type: 'booking'
+          });
+        }
+
+        return true;
       }
-      return true;
+      return false;
     } catch {
       return false;
     }
@@ -140,6 +219,14 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           id: String(Date.now()),
           message: `An interview has been restored to the confirmed schedule.`,
           type: 'booking'
+        });
+      } else if (event.type === 'BOOKING_COMPLETED') {
+        reloadFromStorage();
+        playChime('success');
+        setLiveAlert({
+          id: String(Date.now()),
+          message: `Interview marked as completed and moved to completed section.`,
+          type: 'info'
         });
       } else if (event.type === 'PANEL_MEMBERS_UPDATED' || event.type === 'DATA_RESET' || event.type === 'STORAGE_CHANGE') {
         reloadFromStorage();
@@ -192,6 +279,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       meetingLink,
       assignedPanel,
       bookedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       status: 'confirmed'
     };
 
@@ -254,6 +342,57 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
     return { success: false, message: 'Failed to restore booking.' };
   }, [bookings, panelMembers, reloadFromStorage]);
+
+  const completeInterview = useCallback((bookingId: string) => {
+    storageService.completeBooking(bookingId);
+    reloadFromStorage();
+    playChime('success');
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        bookings: storageService.getBookings(),
+        panelMembers: storageService.getPanelMembers(),
+        passcode: safeGetItem('staff_portal_passcode') || undefined
+      });
+    }
+  }, [reloadFromStorage]);
+
+  const reopenInterview = useCallback((bookingId: string) => {
+    storageService.reopenBooking(bookingId);
+    reloadFromStorage();
+    playChime('success');
+    if (cloudSyncService.isConfigured()) {
+      cloudSyncService.pushToCloud({
+        bookings: storageService.getBookings(),
+        panelMembers: storageService.getPanelMembers(),
+        passcode: safeGetItem('staff_portal_passcode') || undefined
+      });
+    }
+  }, [reloadFromStorage]);
+
+  const markAllPastAsCompleted = useCallback((): number => {
+    const all = storageService.getBookings();
+    let count = 0;
+    all.forEach(b => {
+      if (b.status === 'confirmed' && isBookingPast(b)) {
+        b.status = 'completed';
+        b.updatedAt = new Date().toISOString();
+        count++;
+      }
+    });
+    if (count > 0) {
+      safeSetItem('interview_bookings_v1', JSON.stringify(all));
+      reloadFromStorage();
+      playChime('success');
+      if (cloudSyncService.isConfigured()) {
+        cloudSyncService.pushToCloud({
+          bookings: all,
+          panelMembers: storageService.getPanelMembers(),
+          passcode: safeGetItem('staff_portal_passcode') || undefined
+        });
+      }
+    }
+    return count;
+  }, [reloadFromStorage]);
 
   const toggleEmailSent = useCallback((bookingId: string): boolean => {
     const res = storageService.toggleBookingEmailSent(bookingId);
@@ -334,6 +473,9 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         bookInterview,
         cancelInterview,
         restoreInterview,
+        completeInterview,
+        reopenInterview,
+        markAllPastAsCompleted,
         toggleEmailSent,
         updatePanelMember,
         addPanelMember,
